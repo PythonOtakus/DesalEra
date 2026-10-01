@@ -1,0 +1,47 @@
+# Default: normalize to LF in the repo, keep LF in the working tree.
+* text=auto eol=lf
+
+# Source and data files Unity reads as text.
+*.cs        text eol=lf
+*.json      text eol=lf
+*.asmdef    text eol=lf
+*.md        text eol=lf
+*.shader    text eol=lf
+*.cginc     text eol=lf
+*.hlsl      text eol=lf
+*.uxml      text eol=lf
+*.uss       text eol=lf
+*.txt       text eol=lf
+
+# Unity's serialized files are YAML-like but carry GUID and fileID references that
+# the editor rewrites on import. Mark them -text so Git never touches their bytes.
+# Declared once here; a later duplicate rule would silently override this one.
+*.meta      -text
+*.unity     -text
+*.prefab    -text
+*.asset     -text
+*.mat       -text
+*.renderTexture -text
+*.physicMaterial  -text
+
+# Binary by definition.
+*.fbx       binary
+*.blend     binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.tga       binary
+*.psd       binary
+*.exr       binary
+*.hdr       binary
+*.wav       binary
+*.mp3       binary
+*.ogg       binary
+*.ttf       binary
+*.otf       binary
+*.dll       binary
+*.so        binary
+*.dylib     binary
+*.pdb       binary
+*.exe       binary
+*.unitypackage binary

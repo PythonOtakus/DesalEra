@@ -1,0 +1,19 @@
+{
+  "name": "CrazyAquarium.Editor",
+  "rootNamespace": "CrazyAquarium.EditorTools",
+  "references": [
+    "CrazyAquarium.Core",
+    "CrazyAquarium.Unity"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
