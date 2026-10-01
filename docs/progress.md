@@ -6,22 +6,26 @@
 
 ## 当前状态
 
-**阶段**：技术可行性验证（垂直切片前置）
+**阶段**：可玩灰盒垂直切片已交付
 
-**核心结论**：立体建造的物理模型可行，无需自研引擎。三维交叉支撑已验证，第一大 USP 技术上成立。
+**核心结论**：立体建造的物理模型可行，无需自研引擎。三维交叉支撑已验证，第一大 USP 技术上成立。灰盒可运行。
 
 **验证状态**：
 
 | 项目 | 状态 |
 |---|---|
 | Unity 编译 | ✅ 零错误 |
-| EditMode 测试 | ✅ 52/52 通过（求解器 24 + 表现层 12 + 支撑 16） |
+| EditMode 测试 | ✅ 75/75 通过 |
 | dotnet headless 测试 | ✅ 24/24 通过，约 40 ms |
-| 三维交叉支撑 | ✅ 已验证（2026-10-02，直接刚度法） |
+| **可执行文件构建** | ✅ `Builds/CrazyAquarium.exe` 70 MB |
+| **实际运行验证** | ✅ 进程存活，渲染正常，HUD 工作，无异常 |
+| 三维交叉支撑 | ✅ 已验证（直接刚度法） |
 | 刚架弯曲刚度（EI） | ❌ 未做，纯轴力模型 |
-| 多跨框架 | ❌ 未测 |
-| 失败恢复机制 | ❌ 未定义 |
-| 生存指标系统 | ❌ 未开始 |
+| 失败恢复机制 | ⚠️ 仅有"死亡后重置"，无局部修复 |
+
+**灰盒玩法**：打捞残骸 → 建造（甲板/柱/浮筒/斜撑/淡化器）→ 应对周期风暴 → 生存值压制。全部运行时构建，场景文件仅 180 行。
+
+**已知问题**（见截图）：玩家角色不渲染、画面偏暗、无音效、无存档。
 
 ## 环境事实（已验证）
 
@@ -164,6 +168,10 @@ Push-Location $tmp; dotnet test tests.csproj --nologo -v q; Pop-Location
 | 13 | 风载加了两遍 | `ClearWind` 按当前设置重算，首次求解时减掉了不存在的量 | `Determinism_RepeatSolveOnSameInstanceIsIdempotent` |
 | 14 | 斜撑方向没交替 | `AddMember(left,right)` 的 Axis.x 恒为正，两根斜撑同向 | `Lateral_SingleDiagonalResistsOneDirectionOnly` |
 | 15 | 颜色斜坡断言失效 | 改调色板后 0.9 与 1.2 利用率都饱和在同一颜色 | `ColorFor_UtilizationRampsTowardFailure` |
+| 16 | **开局木筏必沉** | 0.12 m² 塑料浮筒排水 0.24 m³，需 0.55 m³。固体重塑料只有 50 kg/m³ 净浮力 | `Raft_OpeningStateFloats` |
+| 17 | **开局木筏是机构** | 支撑全在中轴线上，面外无约束，桁架矩阵奇异 | `Raft_OpeningStateIsStructurallyStable` |
+| 18 | 密封体积没生效 | `BuoyancyScale` 只乘材料浮力，忽略了 `SealedVolumeM3` | `Raft_SealedPontoonsAreWhatProvideBuoyancy` |
+| 19 | 建造后结构变机构 | 玩家构件单点连接，未形成闭合结构（**这是正确行为**，测试改为断言此行为） | `Raft_BuildingReusesExistingJoints` |
 
 **其中 1、2、3、6、11、13、14 是模型错误，只读代码发现不了，是测试逼出来的。** 写新系统时优先写能暴露单调性、守恒、幂等性的测试。
 
