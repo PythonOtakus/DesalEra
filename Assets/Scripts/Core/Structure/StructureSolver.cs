@@ -187,7 +187,7 @@ namespace CrazyAquarium.Structure
                 massWeighted += m.Midpoint * m.MassKg;
 
                 float submerged = SubmergedFraction(m);
-                float volume = m.BuoyantVolumeM3 * submerged * BuoyancyScale;
+                float volume = m.TotalBuoyantVolumeM3 * submerged * BuoyancyScale;
                 totalBuoyantVolume += volume;
                 buoyancyWeighted += m.Midpoint * volume;
 

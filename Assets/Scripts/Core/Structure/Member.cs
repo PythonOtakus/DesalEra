@@ -37,6 +37,19 @@ namespace CrazyAquarium.Structure
         public float VolumeM3;
         public float BuoyantVolumeM3;
 
+        /// <summary>
+        /// Extra sealed displacement in m3, for hollow members whose volume encloses
+        /// air. A real salvage pontoon is a drum: the shell weighs little while the air
+        /// inside displaces a barrel of water. Modelling bulk density alone gave solid
+        /// plastic 50 kg of lift per cubic metre, which is correct for a plastic slab
+        /// and useless for a barrel, and left the opening raft unable to float at any
+        /// sane size.
+        /// </summary>
+        public float SealedVolumeM3;
+
+        /// <summary>Total displacement: the material's own buoyancy plus sealed air.</summary>
+        public float TotalBuoyantVolumeM3 => BuoyantVolumeM3 + SealedVolumeM3;
+
         /// <summary>Unit vector from JointA to JointB. The truss solver's axis.</summary>
         public Vector3 Axis;
 
