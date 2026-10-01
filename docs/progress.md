@@ -208,7 +208,7 @@ Push-Location $tmp; dotnet test tests.csproj --nologo -v q; Pop-Location
 
 | commit | 内容 |
 |---|---|
-| `（见下方）` | 三维交叉支撑验证：TrussSolver 直接刚度法 + 16 个测试 |
+| `8236727` | 三维交叉支撑验证：TrussSolver 直接刚度法 + 16 个测试 |
 | `933be2c` | 技术验证结论、开发计划、进度文档 |
 | `fa55e1d` | Unity 工程骨架 + 结构物理原型 + 36 个测试 |
 | `2bd794a` | First Commit（仅 `docs/research.md`） |
