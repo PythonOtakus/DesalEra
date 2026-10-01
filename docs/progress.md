@@ -8,16 +8,18 @@
 
 **阶段**：技术可行性验证（垂直切片前置）
 
-**核心结论**：立体建造的物理模型可行，无需自研引擎。但三维交叉支撑尚未验证，是第一大 USP 的最大风险。
+**核心结论**：立体建造的物理模型可行，无需自研引擎。三维交叉支撑已验证，第一大 USP 技术上成立。
 
 **验证状态**：
 
 | 项目 | 状态 |
 |---|---|
 | Unity 编译 | ✅ 零错误 |
-| EditMode 测试 | ✅ 36/36 通过 |
+| EditMode 测试 | ✅ 52/52 通过（求解器 24 + 表现层 12 + 支撑 16） |
 | dotnet headless 测试 | ✅ 24/24 通过，约 40 ms |
-| 三维交叉支撑 | ❌ 未验证 |
+| 三维交叉支撑 | ✅ 已验证（2026-10-02，直接刚度法） |
+| 刚架弯曲刚度（EI） | ❌ 未做，纯轴力模型 |
+| 多跨框架 | ❌ 未测 |
 | 失败恢复机制 | ❌ 未定义 |
 | 生存指标系统 | ❌ 未开始 |
 
@@ -47,10 +49,13 @@ CrazyAquarium/
 │   ├── Core/                      # 求解器，无表现逻辑
 │   │   ├── CrazyAquarium.Core.asmdef
 │   │   ├── Structure/
-│   │   │   ├── Material.cs        # 材料参数 + 承载力计算
+│   │   │   ├── Material.cs        # 材料参数、承载力、弹性模量
 │   │   │   ├── Member.cs          # 构件、节点、求解报告
-│   │   │   └── StructureSolver.cs # 载荷流、浮力、倾覆、坍塌
-│   │   └── Samples/Structures.cs  # 确定性测试夹具
+│   │   │   ├── StructureSolver.cs # 重力流：载荷、浮力、倾覆、坍塌
+│   │   │   └── TrussSolver.cs     # 直接刚度法：矩阵解算、侧向分析
+│   │   └── Samples/
+│   │       ├── Structures.cs      # 确定性测试夹具（筏架、塔、偏载筏）
+│   │       └── BracedFrames.cs    # 带斜撑的框架夹具
 │   ├── Unity/                     # 表现层
 │   │   ├── CrazyAquarium.Unity.asmdef
 │   │   ├── StructureView.cs       # 按利用率染色
@@ -154,8 +159,15 @@ Push-Location $tmp; dotnet test tests.csproj --nologo -v q; Pop-Location
 | 8 | 每次重建场景翻倍 | edit mode 下 `Destroy` 延迟不到 | `Rebuild_IsIdempotent` |
 | 9 | 编译失败 | `Color.Lerp` 是静态方法不是扩展方法 | — |
 | 10 | 类名冲突 | `Prefabs` 与 UnityEngine 概念冲突 | — |
+| 11 | **加斜撑后位移反而变大** | **逐节点 Gauss-Seidel 无法求解超静定结构** | `Lateral_XBraceReducesTopDisplacement` |
+| 12 | 所有构件轴力恒为 0 | 锚固端构件被跳过，载荷路径断开 | `Baseline_ExternalWindIsActuallyApplied` |
+| 13 | 风载加了两遍 | `ClearWind` 按当前设置重算，首次求解时减掉了不存在的量 | `Determinism_RepeatSolveOnSameInstanceIsIdempotent` |
+| 14 | 斜撑方向没交替 | `AddMember(left,right)` 的 Axis.x 恒为正，两根斜撑同向 | `Lateral_SingleDiagonalResistsOneDirectionOnly` |
+| 15 | 颜色斜坡断言失效 | 改调色板后 0.9 与 1.2 利用率都饱和在同一颜色 | `ColorFor_UtilizationRampsTowardFailure` |
 
-**其中 1、2、3、6 是模型错误，只读代码发现不了，是测试逼出来的。** 写新系统时优先写能暴露单调性/守恒关系的测试。
+**其中 1、2、3、6、11、13、14 是模型错误，只读代码发现不了，是测试逼出来的。** 写新系统时优先写能暴露单调性、守恒、幂等性的测试。
+
+**11 值得特别记录**：逐节点松弛在静定结构上完全正常，只有引入斜撑（使其超静定）才暴露。这是"局部正确的实现组合起来是错的"的典型案例——单看每一处代码都没问题。
 
 ## 关键设计决策
 
@@ -175,10 +187,29 @@ Push-Location $tmp; dotnet test tests.csproj --nologo -v q; Pop-Location
 
 见 `research.md` 3.3。这是有意的设计取舍，不是待修的 bug。已用 `Cascade_StrengthToWeightRatioIsNotMonotonic` 固定。
 
+### 两个求解器并存，各自负责不同问题
+
+| | `StructureSolver` | `TrussSolver` |
+|---|---|---|
+| 方法 | 自上而下的载荷流 + 工作队列 | 直接刚度法（矩阵解） |
+| 擅长 | 竖向承重、浮力、倾覆、重力坍塌 | 侧向荷载、斜撑、静不定结构 |
+| 复杂度 | O(构件数 × 迭代) | O(节点数³) |
+| 尺寸上限 | 数百构件 | 数十节点（矩阵法固有限制） |
+
+**为什么不用一个统一的方法**：重力流在几百个构件时比矩阵法快几个数量级，而竖向承重是每帧都要算的；矩阵法只在结构编辑后或受风时跑一次。这是刻意的性能分层，不是重复。
+
+**什么时候需要合并**：如果刚架模型（P1-4）实现后两者差异缩小，应重新评估。
+
+### 拉压分离承载力
+
+细长构件受压强、受拉弱是真实的。`Member.Utilization` 按 `AxialLoadKn` 符号选择承载力。副作用是产生了一个真实的设计空间：X 撑（压杆）与拉杆不可互换，混凝土几乎不能做拉杆。
+
 ## 提交历史
 
 | commit | 内容 |
 |---|---|
+| `（见下方）` | 三维交叉支撑验证：TrussSolver 直接刚度法 + 16 个测试 |
+| `933be2c` | 技术验证结论、开发计划、进度文档 |
 | `fa55e1d` | Unity 工程骨架 + 结构物理原型 + 36 个测试 |
 | `2bd794a` | First Commit（仅 `docs/research.md`） |
 

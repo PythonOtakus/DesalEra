@@ -94,6 +94,40 @@ namespace CrazyAquarium.Structure
             float sectionModulusM3 = side * side * side / 6f;
             return BendingCapacityKnMPerM3(kind) * sectionModulusM3;
         }
+
+        /// <summary>
+        /// Young's modulus in GPa, the axial stiffness input for the truss solver.
+        /// Real values: steel 200, concrete 30, wood 11, plastic 3.
+        /// </summary>
+        public static float YoungsModulusGPa(MaterialKind kind)
+        {
+            switch (kind)
+            {
+                case MaterialKind.Wood: return 11f;
+                case MaterialKind.Plastic: return 3f;
+                case MaterialKind.Steel: return 200f;
+                case MaterialKind.Concrete: return 30f;
+                default: return 11f;
+            }
+        }
+
+        /// <summary>
+        /// Tensile capacity per unit area in kN/m^2. Deliberately lower than the
+        /// compressive capacity, because slender bracing members buckle long before
+        /// steel yields. This gap is what makes diagonals a real design decision:
+        /// a brace strong in compression is still weak in tension.
+        /// </summary>
+        public static float TensileCapacityKnPerM2(MaterialKind kind)
+        {
+            switch (kind)
+            {
+                case MaterialKind.Wood: return 250f;
+                case MaterialKind.Plastic: return 200f;
+                case MaterialKind.Steel: return 2200f;
+                case MaterialKind.Concrete: return 90f;
+                default: return 250f;
+            }
+        }
     }
 
     /// <summary>How a member behaves once its limits are exceeded.</summary>

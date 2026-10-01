@@ -110,7 +110,11 @@ namespace CrazyAquarium.Structure
 
         public void RecomputeAllDerived()
         {
-            foreach (Member m in Members) m.RecomputeDerived();
+            foreach (Member m in Members)
+            {
+                m.RecomputeDerived();
+                m.RecomputeAxis(Joints[m.JointA].Position, Joints[m.JointB].Position);
+            }
         }
 
         public int LiveMemberCount

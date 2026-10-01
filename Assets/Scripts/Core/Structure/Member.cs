@@ -37,7 +37,29 @@ namespace CrazyAquarium.Structure
         public float VolumeM3;
         public float BuoyantVolumeM3;
 
-        /// <summary>Axial load in kilonewtons.</summary>
+        /// <summary>Unit vector from JointA to JointB. The truss solver's axis.</summary>
+        public Vector3 Axis;
+
+        /// <summary>
+        /// Axial rigidity EA in kN, the stiffness the truss solver relaxes against.
+        /// kN rather than N because every other force in the model is in kN.
+        /// </summary>
+        public float AxialRigidityKn => MaterialProperties.YoungsModulusGPa(Material) * 1e6f * CrossSectionAreaM2 / 1000f;
+
+        /// <summary>
+        /// Axial capacity in compression, kN. Compression is stronger than tension
+        /// for these materials, so a brace is a poor tie.
+        /// </summary>
+        public float CompressionCapacityKn => AxialCapacityKn;
+
+        /// <summary>Axial capacity in tension, kN. Much the weaker direction.</summary>
+        public float TensionCapacityKn => MaterialProperties.TensileCapacityKnPerM2(Material) * CrossSectionAreaM2;
+
+        /// <summary>
+        /// Axial load in kN. Positive is tension, negative compression. The truss
+        /// solver writes this; the gravity-flow solver also uses it, so the sign
+        /// convention holds across both.
+        /// </summary>
         public float AxialLoadKn;
 
         /// <summary>Bending moment magnitude in kN*m.</summary>
@@ -63,18 +85,36 @@ namespace CrazyAquarium.Structure
 
         public float BendingCapacityKnM => MaterialProperties.MaxBendingMomentKnM(Material, CrossSectionAreaM2);
 
-        /// <summary>0 = unloaded, 1 = at capacity, above 1 = over capacity.</summary>
+        /// <summary>
+        /// 0 = unloaded, 1 = at capacity in the governing direction, above 1 = failed.
+        ///
+        /// Tension and compression are compared against different capacities. Without
+        /// that split a slender brace reports as strong in tension because it is
+        /// rated for compression, and the whole point of choosing between an X-brace
+        /// and a tie disappears.
+        /// </summary>
         public float Utilization
         {
             get
             {
-                float axialCap = AxialCapacityKn;
                 float bendCap = BendingCapacityKnM;
-                float axialUtil = axialCap <= 0f ? float.MaxValue : Mathf.Abs(AxialLoadKn) / axialCap;
                 float bendUtil = bendCap <= 0f ? float.MaxValue : BendingMomentKnM / bendCap;
-                return Mathf.Max(axialUtil, bendUtil);
+
+                if (AxialLoadKn >= 0f)
+                {
+                    float tensionCap = TensionCapacityKn;
+                    float tensionUtil = tensionCap <= 0f ? float.MaxValue : AxialLoadKn / tensionCap;
+                    return Mathf.Max(tensionUtil, bendUtil);
+                }
+
+                float compressionCap = CompressionCapacityKn;
+                float compressionUtil = compressionCap <= 0f ? float.MaxValue : -AxialLoadKn / compressionCap;
+                return Mathf.Max(compressionUtil, bendUtil);
             }
         }
+
+        /// <summary>True when the member is being stretched rather than squeezed.</summary>
+        public bool IsInTension => AxialLoadKn > 0f;
 
         public void RecomputeDerived()
         {
@@ -85,6 +125,13 @@ namespace CrazyAquarium.Structure
             BuoyantVolumeM3 = MaterialProperties.DensityKgPerM3(Material) < WaterDensityKgPerM3
                 ? VolumeM3
                 : 0f;
+        }
+
+        /// <summary>Recomputes the axis. Call after either joint moves.</summary>
+        public void RecomputeAxis(Vector3 from, Vector3 to)
+        {
+            Vector3 delta = to - from;
+            Axis = delta.sqrMagnitude < 1e-10f ? Vector3.up : delta.normalized;
         }
     }
 

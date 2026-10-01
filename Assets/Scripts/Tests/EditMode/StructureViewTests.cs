@@ -46,15 +46,17 @@ namespace CrazyAquarium.Tests
 
             Color at0 = view.ColorFor(member);
 
+            member.AxialLoadKn = member.AxialCapacityKn * 0.3f;
+            Color at3 = view.ColorFor(member);
+
             member.AxialLoadKn = member.AxialCapacityKn * 0.9f;
             Color at9 = view.ColorFor(member);
 
-            member.AxialLoadKn = member.AxialCapacityKn * 1.2f;
-            Color past = view.ColorFor(member);
-
-            Assert.AreNotEqual(at0, at9, "colour must respond to load");
-            Assert.Greater(at9.r, at0.r, "a loaded member must read redder than an intact one");
-            Assert.Greater(past.r, at9.r, "an overloaded member must read redder still");
+            // Sampled inside the ramp rather than past its end. Both ends of the range
+            // sit at the critical colour, so asserting between 0.9 and 1.2 compares two
+            // identical values and passes or fails for no reason.
+            Assert.Greater(at3.r, at0.r, "a loaded member must read redder than an intact one");
+            Assert.Greater(at9.r, at3.r, "and redder still as it approaches the limit");
         }
 
         [Test]
