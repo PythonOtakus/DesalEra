@@ -51,6 +51,38 @@ namespace CrazyAquarium.EditorTools
         private const string DefaultState = "Idle";
 
         /// <summary>
+        /// Bones that make up one arm, proximal to distal, paired with the share of the
+        /// swing each one carries.
+        ///
+        /// The swing is split rather than applied to the clavicle alone because a single
+        /// 67 degree rotation tears the mesh open at the armpit. Vertices around the
+        /// shoulder are weighted across the spine, the clavicle and the upper arm, so
+        /// turning one of those joints by the full amount drags them apart. Handing each
+        /// joint part of the rotation keeps every joint's deformation small, which is the
+        /// same reason a rigger never corrects an A-pose on the shoulder alone.
+        /// </summary>
+        private static readonly (string Bone, float Weight)[] ArmChain =
+        {
+            ("LeftShoulder", 0.45f),
+            ("LeftArm", 0.40f),
+            ("LeftForeArm", 0.15f),
+            ("RightShoulder", 0.45f),
+            ("RightArm", 0.40f),
+            ("RightForeArm", 0.15f),
+        };
+
+        /// <summary>
+        /// How far the arms are swung from straight out towards straight down.
+        ///
+        /// 90 degrees would hang them against the body, which reads as stiff. Stopping
+        /// short leaves a slight outward angle, the A-pose a standing person actually
+        /// holds. Measured on this rig the rest pose points 0.98 along the character's
+        /// left with only 0.19 of drop over a 0.54 m arm, so the swing needed is close to
+        /// the full quarter turn.
+        /// </summary>
+        private const float ArmHangDegrees = 78f;
+
+        /// <summary>
         /// Menu entry for re-baking after the source FBX or the character model changes.
         /// The baked assets are generated output and are committed, so a fresh clone has
         /// working animation without needing an editor step first.
@@ -63,6 +95,18 @@ namespace CrazyAquarium.EditorTools
 
         public static string BakeAll()
         {
+            // Rebuilding the controller deletes and recreates the asset, which invalidates
+            // whatever a running player already resolved from Resources. The survivor is
+            // then left with a destroyed controller reference that reads as null, and the
+            // only symptom is a character that silently does not animate. Baking is an
+            // edit-time step anyway.
+            if (EditorApplication.isPlaying)
+            {
+                const string message = "ABORTED: cannot bake while in play mode; exit play and re-run";
+                Debug.LogError("[CrazyAquarium] " + message);
+                return message;
+            }
+
             var log = new System.Text.StringBuilder();
 
             var character = LoadRig(CharacterModelPath);
@@ -174,6 +218,72 @@ namespace CrazyAquarium.EditorTools
 
             stack.Reverse();
             return string.Join("/", stack);
+        }
+
+        /// <summary>
+        /// Rotation that swings an arm bone's subtree partway towards hanging down.
+        ///
+        /// The axis is derived from the rig rather than dialled in: it is whatever axis
+        /// takes the bone's actual direction to its child towards straight down. A
+        /// hardcoded Euler here would be silently wrong for any other model and would
+        /// encode nothing about why the number is what it is.
+        ///
+        /// The result is expressed in the bone's own frame so it can be post-multiplied
+        /// onto the rest rotation, which rotates the whole subtree about the bone while
+        /// leaving every joint angle inside it alone.
+        /// </summary>
+        private static Quaternion ArmSwingCorrection(Transform bone, float degrees)
+        {
+            if (bone == null || bone.childCount == 0) return Quaternion.identity;
+            if (degrees <= 0f) return Quaternion.identity;
+
+            Vector3 origin = bone.localToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
+            Vector3 tip = bone.GetChild(0).localToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
+            Vector3 current = tip - origin;
+
+            // A zero-length child offset means the rig is not laid out the way this
+            // correction assumes. Leaving the bone alone beats rotating about a
+            // meaningless axis.
+            if (current.sqrMagnitude < 1e-8f) return Quaternion.identity;
+
+            current.Normalize();
+
+            Vector3 down = Vector3.down;
+            Vector3 axis = Vector3.Cross(current, down);
+
+            // Already vertical, or the cross product vanishes. Nothing to swing.
+            if (axis.sqrMagnitude < 1e-8f) return Quaternion.identity;
+            axis.Normalize();
+
+            // Never swing past vertical. The chain is rotated by every bone in sequence,
+            // so a bone late in the chain may already be closer to hanging than the share
+            // it was handed suggests.
+            float angle = Mathf.Min(degrees, Vector3.Angle(current, down));
+            if (angle <= 0f) return Quaternion.identity;
+
+            // A rotation about a fixed axis scaled by a fraction is the same axis at the
+            // scaled angle, so the local axis can be derived once from the world axis.
+            Quaternion boneWorldInverse = Quaternion.Inverse(bone.localToWorldMatrix.rotation);
+            Vector3 localAxis = boneWorldInverse * axis;
+
+            return Quaternion.AngleAxis(angle, localAxis);
+        }
+
+        /// <summary>
+        /// Rest rotation for a character bone, with its share of the arm swing folded in.
+        /// </summary>
+        private static Quaternion CorrectedRest(Transform bone)
+        {
+            Quaternion rest = bone.localRotation;
+
+            foreach (var (name, weight) in ArmChain)
+            {
+                if (!bone.name.Equals(name, System.StringComparison.OrdinalIgnoreCase)) continue;
+                rest *= ArmSwingCorrection(bone, ArmHangDegrees * weight);
+                break;
+            }
+
+            return rest;
         }
 
         /// <summary>
@@ -351,7 +461,7 @@ namespace CrazyAquarium.EditorTools
                 !curves.TryGetValue("m_LocalRotation.w", out cw))
                 return;
 
-            Quaternion charRest = charBone.localRotation;
+            Quaternion charRest = CorrectedRest(charBone);
             Quaternion animRest = animBone.localRotation;
             Quaternion animRestInverse = Quaternion.Inverse(animRest);
 

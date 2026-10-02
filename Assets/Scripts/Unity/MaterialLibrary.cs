@@ -103,14 +103,17 @@ namespace CrazyAquarium.Unity
 
         private void OnDestroy()
         {
+            // Only the materials are ours. The textures came from Resources and belong to
+            // the asset database: Unity refuses to Destroy those ("Destroying assets is
+            // not permitted to avoid data loss"), and it owns their lifetime anyway. The
+            // warning used to surface on every play-mode exit, where isPlaying is still
+            // briefly true inside OnDestroy.
             foreach (KeyValuePair<string, Material> entry in _materials)
             {
                 if (entry.Value != null) SafeDestroy(entry.Value);
             }
-            foreach (KeyValuePair<string, Texture2D> entry in _textures)
-            {
-                if (entry.Value != null) SafeDestroy(entry.Value);
-            }
+
+            if (_fallback != null) SafeDestroy(_fallback);
         }
 
         private void BuildAll()
