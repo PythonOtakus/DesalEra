@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "com.youngwoocho02.unity-cli-connector": "https://github.com/youngwoocho02/unity-cli.git?path=unity-connector#v0.4.1",
     "com.unity.test-framework": "1.1.33",
     "com.unity.nuget.newtonsoft-json": "3.2.1",
     "com.unity.modules.androidjni": "1.0.0",

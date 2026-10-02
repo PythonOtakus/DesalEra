@@ -25,6 +25,15 @@
       },
       "url": "https://packages.unity.cn"
     },
+    "com.youngwoocho02.unity-cli-connector": {
+      "version": "https://github.com/youngwoocho02/unity-cli.git?path=unity-connector#v0.4.1",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.1"
+      },
+      "hash": "8603ea0a064d57b058a7a12f1a6a4f6db933656a"
+    },
     "com.unity.modules.androidjni": {
       "version": "1.0.0",
       "depth": 0,
