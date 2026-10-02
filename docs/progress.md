@@ -58,6 +58,43 @@ Meshy 把角色与动画导出成两个 FBX，直接套用会失败两次，两�
 途中还排除了 legacy `Animation` 组件：它的时间会累加到 494 s 而不循环，
 且不驱动骨骼。改用 Mecanim + 烘焙的 `AnimatorController`。
 
+### 动画包接入（2026-10-03 追加）
+
+Downloads 里 10 个 Meshy 压缩包已全部解压进 `Assets/Art/Characters/Survivor/Animations/`：
+
+| zip | 项目文件名 | 时长 |
+|---|---|---|
+| (无) | `Survivor_Idle.fbx` | 1.88 s |
+| (1) | `Survivor_Jump.fbx` | 1.88 s |
+| (2) | `Survivor_JumpObstacle.fbx` | 0.88 s |
+| (3) | `Survivor_SwimIdle.fbx` | 3.00 s |
+| (4) | `Survivor_SwimForward.fbx` | 4.50 s |
+| (5) | `Survivor_LadderMountStart.fbx` | 2.00 s |
+| (6) | `Survivor_LadderClimbLoop.fbx` | 1.63 s |
+| (7) | `Survivor_LadderClimbFinish.fbx` | 4.00 s |
+| (8) | `Survivor_RopeHangIdle.fbx` | 2.58 s |
+| (9) | `Survivor_RopeSwingToGround.fbx` | 4.33 s |
+
+每包都附带了同一套 4 张贴图，与工程内已有副本逐字节同源，已跳过。
+这些是 `without_skin` 导出，只有骨架与动画，无网格，单个约 0.2 MB；
+已有的 walk/run 是 `withSkin`，各含一份重复网格、各 28.7 MB。
+
+baker 改为自动发现目录下所有 FBX，状态名由文件名去掉 `Survivor_` 前缀得到，
+新增动画不再需要改代码。12 个 clip 全部烘焙成功，各 23 根骨骼完成差分重定向。
+
+**关键发现：每个 FBX 的参考姿势都不一样。** Idle 的 `LeftArm` 静止角是
+`(49,275,77)`，SwimForward 是 `(50,264,3)`，LadderClimbLoop 是 `(38,301,50)`，
+角色本身是 `(352,240,2)`。差分重定向逐文件读取各自的 `animRest` 才成立，
+用统一参考姿势会全部错位。
+
+**顺带解决了一个旧问题**：此前没有 Idle 动画，`PlayerAnimator` 只能把走路姿势
+冻结在 `speed=0` 冒充站立。现在 Idle 以全速播放真实的 Idle clip。
+
+**新暴露的问题**：Meshy 的动画全部以「双臂水平张开」为中立姿势。实测 Idle 循环
+全程 `LeftArm` 只从 `(352,240,2)` 变到 `(345,246,5)`，共 7°，所以角色呈现 T-pose，
+像稻草人。差分重定向本身正确（nt0 恰好等于绑定姿势，证明 `animRest` 取的就是
+clip 第 0 帧），这是授权姿势问题，需要额外的肩/上臂下垂校正。
+
 ## 环境事实（已验证）
 
 | 项 | 值 |

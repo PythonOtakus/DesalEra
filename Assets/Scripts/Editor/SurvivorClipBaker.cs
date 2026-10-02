@@ -45,6 +45,12 @@ namespace CrazyAquarium.EditorTools
         private const string BonePrefix = "mixamorig:";
 
         /// <summary>
+        /// State the controller starts in. Idle rather than Walk: an idle clip now
+        /// exists, so there is no reason to begin the survivor mid-stride.
+        /// </summary>
+        private const string DefaultState = "Idle";
+
+        /// <summary>
         /// Menu entry for re-baking after the source FBX or the character model changes.
         /// The baked assets are generated output and are committed, so a fresh clone has
         /// working animation without needing an editor step first.
@@ -68,12 +74,54 @@ namespace CrazyAquarium.EditorTools
 
             log.Append("character bones=").Append(character.Count).Append(" ");
 
-            Bake("Survivor_Walk", "Walk", character, log);
-            Bake("Survivor_Run", "Run", character, log);
-            BuildController(log);
+            // Every FBX dropped into the folder is baked, rather than a list kept in code.
+            // Meshy delivers one archive per animation, each holding a single clip, so a
+            // hardcoded list meant editing and recompiling the baker for every new
+            // download. The state name comes from the file name, which keeps the asset
+            // name and the Animator state from drifting apart.
+            var sources = DiscoverSources();
+            log.Append("sources=").Append(sources.Count).Append(" ");
+
+            foreach (string fbxName in sources)
+            {
+                Bake(fbxName, StateNameFor(fbxName), character, log);
+            }
+
+            BuildController(sources, log);
 
             AssetDatabase.SaveAssets();
             return log.ToString();
+        }
+
+        /// <summary>
+        /// Base names of every animation FBX in the source folder, sorted so a bake is
+        /// reproducible and the log reads in a stable order.
+        /// </summary>
+        private static List<string> DiscoverSources()
+        {
+            var names = new List<string>();
+
+            foreach (var guid in AssetDatabase.FindAssets("t:Model", new[] { SourceFolder }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (!path.EndsWith(".fbx", System.StringComparison.OrdinalIgnoreCase)) continue;
+                names.Add(System.IO.Path.GetFileNameWithoutExtension(path));
+            }
+
+            names.Sort(System.StringComparer.Ordinal);
+            return names;
+        }
+
+        /// <summary>
+        /// "Survivor_Walk" becomes "Walk", which is both the clip name and the Animator
+        /// state name.
+        /// </summary>
+        private static string StateNameFor(string fbxName)
+        {
+            const string prefix = "Survivor_";
+            return fbxName.StartsWith(prefix, System.StringComparison.Ordinal)
+                ? fbxName.Substring(prefix.Length)
+                : fbxName;
         }
 
         /// <summary>
@@ -417,50 +465,54 @@ namespace CrazyAquarium.EditorTools
         }
 
         /// <summary>
-        /// Writes an AnimatorController holding one looping state per clip.
+        /// Writes an AnimatorController with one state per baked clip.
         ///
-        /// The controller exists only to give the two states somewhere to live. No
-        /// transitions and no parameters are authored: PlayerAnimator picks a state with
-        /// Animator.Play and freezes the survivor by setting speed to zero when standing
-        /// still. Threshold transitions would move one comparison somewhere less readable.
+        /// The controller exists to give the states somewhere to live. No transitions and
+        /// no parameters are authored: PlayerAnimator picks a state with Animator.Play,
+        /// because a threshold transition per pair would turn a single readable comparison
+        /// in code into a parameter graph nobody can check at a glance.
+        ///
+        /// Idle is the default state rather than Walk. Walk used to be the default only
+        /// because no idle clip existed and a walking character with the animator at zero
+        /// speed was the least bad stand-in.
         /// </summary>
-        private static void BuildController(System.Text.StringBuilder log)
+        private static void BuildController(List<string> sources, System.Text.StringBuilder log)
         {
-            var walk = AssetDatabase.LoadAssetAtPath<AnimationClip>(OutputFolder + "/Survivor_Walk.anim");
-            var run = AssetDatabase.LoadAssetAtPath<AnimationClip>(OutputFolder + "/Survivor_Run.anim");
-
-            if (walk == null && run == null)
-            {
-                log.Append("CONTROLLER SKIPPED: no baked clips || ");
-                return;
-            }
-
             AssetDatabase.DeleteAsset(ControllerPath);
             var controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
             var root = controller.layers[0].stateMachine;
 
             int created = 0;
-            if (walk != null)
+            var createdNames = new List<string>();
+
+            foreach (string fbxName in sources)
             {
-                var state = root.AddState("Walk");
-                state.motion = walk;
+                string stateName = StateNameFor(fbxName);
+                var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(OutputFolder + "/" + fbxName + ".anim");
+                if (clip == null) continue;
+
+                var state = root.AddState(stateName);
+                state.motion = clip;
                 state.writeDefaultValues = false;
-                root.defaultState = state;
                 created++;
+                createdNames.Add(stateName);
+
+                if (stateName == DefaultState) root.defaultState = state;
             }
 
-            if (run != null)
+            if (created == 0)
             {
-                var state = root.AddState("Run");
-                state.motion = run;
-                state.writeDefaultValues = false;
-                created++;
+                log.Append("CONTROLLER: no clips, left empty || ");
+                return;
             }
 
             // Root motion is disabled on the Animator at runtime rather than here:
             // applyRootMotion is not a property of the controller asset.
             EditorUtility.SetDirty(controller);
-            log.Append("CONTROLLER: ").Append(created).Append(" states || ");
+
+            log.Append("CONTROLLER: ").Append(created).Append(" states [");
+            log.Append(string.Join(", ", createdNames.ToArray()));
+            log.Append("] || ");
         }
     }
 }

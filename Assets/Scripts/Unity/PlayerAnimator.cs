@@ -30,6 +30,7 @@ namespace CrazyAquarium.Unity
 
         private PlayerAvatar _avatar;
         private Animator _animator;
+        private int _idleHash;
         private int _walkHash;
         private int _runHash;
         private bool _ready;
@@ -73,12 +74,9 @@ namespace CrazyAquarium.Unity
             // fixed follow offset, and a culled pose snaps back visibly on return.
             _animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
 
+            _idleHash = Animator.StringToHash("Idle");
             _walkHash = Animator.StringToHash("Walk");
             _runHash = Animator.StringToHash("Run");
-
-            _animator.Play(_walkHash, 0, 0f);
-            _animator.speed = 0f;
-            _currentState = "Idle";
 
             // Animator.Play on a state the controller does not contain is silently
             // dropped, which would leave the survivor stuck in its imported pose with no
@@ -88,9 +86,15 @@ namespace CrazyAquarium.Unity
             {
                 Debug.LogWarning("[CrazyAquarium] survivor controller has no Walk state; " +
                                  "re-run SurvivorClipBaker.BakeAll(). The survivor will not animate.");
+                return false;
             }
 
-            return _ready;
+            // A real idle clip exists now, so the survivor stands rather than freezing
+            // mid-stride. The controller's default state is already Idle; playing it
+            // explicitly keeps the starting state independent of how the controller was
+            // authored.
+            Play(_idleHash, "Idle", 1f);
+            return true;
         }
 
         /// <summary>
@@ -111,23 +115,24 @@ namespace CrazyAquarium.Unity
             }
             else
             {
-                // There is no generated idle clip. Holding the walk pose by setting the
-                // animator speed to zero reads as standing still, where switching to an
-                // absent idle state would read as a character frozen mid-stride.
-                Play(_walkHash, "Idle", 0f);
+                // Idle plays at full speed. It used to be the walk cycle held at animator
+                // speed zero, which stood the survivor frozen mid-stride.
+                Play(_idleHash, "Idle", 1f);
             }
         }
 
+        /// <summary>
+        /// Selects a state, cross-fading out of the previous one.
+        ///
+        /// The animator speed is always 1 now that there is a real idle clip, so the only
+        /// thing that decides the survivor's motion is which state is playing.
+        /// </summary>
         private void Play(int stateHash, string stateName, float animatorSpeed)
         {
-            if (_animator.speed != animatorSpeed || _currentState != stateName)
-            {
-                // Re-issuing the same state every frame would restart its timeline each
-                // frame, pinning the survivor in its first pose.
-                if (_currentState != stateName) _animator.Play(stateHash, 0, 0f);
-                _currentState = stateName;
-            }
+            if (_currentState == stateName) return;
 
+            _animator.CrossFadeInFixedTime(stateHash, crossFadeSeconds);
+            _currentState = stateName;
             _animator.speed = animatorSpeed;
         }
     }

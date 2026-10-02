@@ -122,7 +122,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &1331248347
+--- !u!1 &1753777491
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -130,8 +130,8 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1331248349}
-  - component: {fileID: 1331248348}
+  - component: {fileID: 1753777493}
+  - component: {fileID: 1753777492}
   m_Layer: 0
   m_Name: GameEntry
   m_TagString: Untagged
@@ -139,13 +139,13 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1331248348
+--- !u!114 &1753777492
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1331248347}
+  m_GameObject: {fileID: 1753777491}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 563d387ae7d83f143baf72205560aff3, type: 3}
@@ -158,13 +158,13 @@ MonoBehaviour:
   skyColour: {r: 0.42, g: 0.48, b: 0.52, a: 1}
   fogColour: {r: 0.36, g: 0.42, b: 0.46, a: 1}
   fogDensity: 0.018
---- !u!4 &1331248349
+--- !u!4 &1753777493
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1331248347}
+  m_GameObject: {fileID: 1753777491}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -177,4 +177,4 @@ Transform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 1331248349}
+  - {fileID: 1753777493}
