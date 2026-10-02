@@ -97,22 +97,29 @@ Meshy 把角色和动画导出成一批互不兼容的 FBX，直接把动画套�
    `(352,240,2)`，Idle 导出是 `(49,275,77)`，游泳是 `(50,264,3)`）。动画存的是绝对
    局部旋转，直接套用会让双臂举过头顶、头部前俯。每条曲线按
    `charRest * inverse(animRest) * src(t)` 换算，逐文件读取各自的参考姿势。
-3. **烘焙为 `.anim` + AnimatorController** — FBX 里的 clip 是子资源，运行时无法按名
-   加载。baker 输出独立 `.anim` 和 `Survivor.controller`，运行时用 `Animator.Play`。
+3. **烘焙为独立 `.anim`** — FBX 里的 clip 是子资源，运行时无法按名加载。baker 为每个
+   动画输出一个 `Survivor_<State>.anim`。
 
 baker 自动发现 `Assets/Art/Characters/Survivor/Animations/` 下的所有 FBX，文件名去掉
-`Survivor_` 前缀即 Animator 状态名，新增动画不需要改代码。
+`Survivor_` 前缀即 clip 名，新增动画不需要改代码。
 
-已接入 **12 个状态**：`Idle`、`Walk`、`Run`、`Jump`、`JumpObstacle`、`SwimIdle`、
+已烘焙 **12 个 clip**：`Idle`、`Walk`、`Run`、`Jump`、`JumpObstacle`、`SwimIdle`、
 `SwimForward`、`LadderMountStart`、`LadderClimbLoop`、`LadderClimbFinish`、
-`RopeHangIdle`、`RopeSwingToGround`。当前玩法只用到 Idle / Walk / Run，其余已烘焙
-待接线（游泳和梯子/绳索都还没有对应的玩法）。
+`RopeHangIdle`、`RopeSwingToGround`。当前玩法只用到 Idle / Walk / Run，其余已接进
+图里待接线（游泳和梯子/绳索都还没有对应的玩法）。
 
-烘焙必须在 Edit 模式运行：重建 controller 会删除并重新创建资产，让正在运行的玩家
-持有已销毁的引用，唯一症状是角色悄悄不动。baker 现在会直接拒绝在 Play 模式执行。
+**运行时用 Playables 图，不用 AnimatorController。** 脚本创建的 `AnimatorState` 不是
+合法子资源：它能写进资产文件，但资产一旦被重新导入（构建时的 `AssetDatabase.Refresh()`
+就会触发）状态全部丢失。编辑器 Play 模式用的是内存对象，所以每次测试都通过；而构建版
+拿到的是「1 个层、0 个状态」的 controller，角色直接退回绑定姿势——也就是 T-pose，且
+没有任何报错说明真实原因。Playables 图没有资产可序列化，编辑器与构建版跑的是同一份
+代码，不可能再分叉。
 
-烘焙后仍需**渲染验证**：路径全对、零未命中解析，也不代表姿势正确。绑定姿势错配
-只有出图才能发现。
+烘焙必须在 Edit 模式运行：重建资产会让正在运行的玩家持有已销毁的引用，唯一症状是
+角色悄悄不动。baker 现在会直接拒绝在 Play 模式执行。
+
+烘焙后仍需**在构建版里验证**：Play 模式全部通过并不能证明构建版可用，这个坑就是这样
+漏出去的。路径全对、零未命中解析，也不代表姿势正确——绑定姿势错配只有出图才能发现。
 
 ### T-pose 修正
 

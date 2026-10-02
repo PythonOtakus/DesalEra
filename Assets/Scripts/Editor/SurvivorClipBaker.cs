@@ -1,13 +1,19 @@
+﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
-using UnityEditor.Animations;
 using UnityEngine;
 
 namespace CrazyAquarium.EditorTools
 {
     /// <summary>
     /// Bakes the survivor's animation clips from the Meshy FBX files into standalone
-    /// .anim assets and an AnimatorController under Resources.
+    /// .anim assets under Resources.
+    ///
+    /// This only produces clips. It deliberately does not author an AnimatorController:
+    /// states created by script do not survive reimport, so a controller built here was
+    /// playable in the editor and empty in every build. PlayerAnimator drives the baked
+    /// clips through a Playables graph instead, which has no asset to serialise.
     ///
     /// Two problems have to be solved for these clips to drive the character, and both
     /// are invisible until the model is actually rendered.
@@ -38,17 +44,10 @@ namespace CrazyAquarium.EditorTools
     {
         private const string SourceFolder = "Assets/Art/Characters/Survivor/Animations";
         private const string OutputFolder = "Assets/Resources";
-        private const string ControllerPath = "Assets/Resources/Survivor.controller";
         private const string CharacterModelPath = "Assets/Art/Characters/Survivor/Models/Survivor.fbx";
 
         // Stripped from every animation bone name before matching.
         private const string BonePrefix = "mixamorig:";
-
-        /// <summary>
-        /// State the controller starts in. Idle rather than Walk: an idle clip now
-        /// exists, so there is no reason to begin the survivor mid-stride.
-        /// </summary>
-        private const string DefaultState = "Idle";
 
         /// <summary>
         /// Bones that make up one arm, proximal to distal, paired with the share of the
@@ -131,7 +130,6 @@ namespace CrazyAquarium.EditorTools
                 Bake(fbxName, StateNameFor(fbxName), character, log);
             }
 
-            BuildController(sources, log);
 
             AssetDatabase.SaveAssets();
             return log.ToString();
@@ -574,55 +572,6 @@ namespace CrazyAquarium.EditorTools
             return null;
         }
 
-        /// <summary>
-        /// Writes an AnimatorController with one state per baked clip.
-        ///
-        /// The controller exists to give the states somewhere to live. No transitions and
-        /// no parameters are authored: PlayerAnimator picks a state with Animator.Play,
-        /// because a threshold transition per pair would turn a single readable comparison
-        /// in code into a parameter graph nobody can check at a glance.
-        ///
-        /// Idle is the default state rather than Walk. Walk used to be the default only
-        /// because no idle clip existed and a walking character with the animator at zero
-        /// speed was the least bad stand-in.
-        /// </summary>
-        private static void BuildController(List<string> sources, System.Text.StringBuilder log)
-        {
-            AssetDatabase.DeleteAsset(ControllerPath);
-            var controller = AnimatorController.CreateAnimatorControllerAtPath(ControllerPath);
-            var root = controller.layers[0].stateMachine;
 
-            int created = 0;
-            var createdNames = new List<string>();
-
-            foreach (string fbxName in sources)
-            {
-                string stateName = StateNameFor(fbxName);
-                var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(OutputFolder + "/" + fbxName + ".anim");
-                if (clip == null) continue;
-
-                var state = root.AddState(stateName);
-                state.motion = clip;
-                state.writeDefaultValues = false;
-                created++;
-                createdNames.Add(stateName);
-
-                if (stateName == DefaultState) root.defaultState = state;
-            }
-
-            if (created == 0)
-            {
-                log.Append("CONTROLLER: no clips, left empty || ");
-                return;
-            }
-
-            // Root motion is disabled on the Animator at runtime rather than here:
-            // applyRootMotion is not a property of the controller asset.
-            EditorUtility.SetDirty(controller);
-
-            log.Append("CONTROLLER: ").Append(created).Append(" states [");
-            log.Append(string.Join(", ", createdNames.ToArray()));
-            log.Append("] || ");
-        }
     }
 }

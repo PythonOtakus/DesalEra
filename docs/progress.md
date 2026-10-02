@@ -56,7 +56,37 @@ Meshy 把角色与动画导出成两个 FBX，直接套用会失败两次，两�
 零未命中解析时曲线看起来完全正常。
 
 途中还排除了 legacy `Animation` 组件：它的时间会累加到 494 s 而不循环，
-且不驱动骨骼。改用 Mecanim + 烘焙的 `AnimatorController`。
+且不驱动骨骼。改用 Mecanim。
+
+### AnimatorController 资产不可用，改为 Playables（2026-10-03）
+
+最初用脚本创建 `AnimatorController` 并 `AddState` 写入 12 个状态。编辑器里
+Play 模式完全正常，但**构建版里角色始终是 T-pose**。这一条花了最长时间，因为
+它同时满足三个条件：编辑器测试全绿、没有任何报错、日志里唯一的警告还指错了方向。
+
+根因分两层：
+
+1. **`AnimatorStateMachine.AddState` 创建的状态不是合法子资源。** 它们会被写进
+   `.controller` 文件（12 个 `AnimatorState` 文档、`m_ChildStates` 里 12 个 fileID
+   引用），但资产一旦被重新导入，Unity 就把它们全丢掉，`m_ChildStates` 变回 `[]`。
+   构建时 `SceneBuilder.Build()` 里的 `AssetDatabase.Refresh()` 正好触发重新导入。
+   先后试过「清空已有 controller 的状态」和「在临时路径构建再移动」，都产出同样
+   的坏文件——只有全新路径的一次性创建是好的。
+2. **编辑器与构建版读的是不同的东西。** Play 模式用内存里的对象，所以状态齐全；
+   构建版用序列化结果，所以是空状态机。角色因此退回网格绑定姿势，也就是 T-pose。
+
+最终改用 **Playables 图**：`AnimationPlayableOutput` + `AnimationMixerPlayable`，
+12 个 `AnimationClipPlayable` 各占一个输入，代码里按速度选择。没有资产要序列化，
+编辑器与构建版跑同一份代码。
+
+改用 Playables 后又暴露一个自己写的 bug：过渡逻辑用 `_playing` 列表做增量权重
+管理，当「正在淡入的 clip」被再次选中时 `_fadeFrom == _fadeTo`，收尾那句
+`SetInputWeight(_fadeFrom, 0)` 会把刚拉满权重的目标自己清零，**所有输入权重变成
+0**，角色又不动了。改成显式的 `_activeInput` / `_fadingFrom` / `_fadingTo` 三个
+字段后，任何时刻只有两个权重被触碰，可直接读数核对。
+
+最终验证（构建版 exe 实测，非编辑器）：角色双臂下垂、行走步态正常、体力随移动
+下降、点击可建造（PIECES 8→9、载荷 58→56 kN）。
 
 ### 动画包接入（2026-10-03 追加）
 
