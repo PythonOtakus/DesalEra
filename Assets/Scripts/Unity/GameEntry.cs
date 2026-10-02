@@ -44,6 +44,8 @@ namespace CrazyAquarium.Unity
             _playerTransform = playerGo.transform;
 
             var player = playerGo.AddComponent<PlayerController>();
+            var avatar = playerGo.AddComponent<PlayerAvatar>();
+            var animator = playerGo.AddComponent<PlayerAnimator>();
 
             // The camera must exist before the player initialises, because movement is
             // camera-relative and would otherwise fall back to a fixed world axis on
@@ -51,6 +53,10 @@ namespace CrazyAquarium.Unity
             _camera = CreateCamera();
 
             player.Initialise(bootstrap, _camera.transform);
+            avatar.Initialise(playerGo.transform);
+            animator.Initialise();
+            player.Avatar = avatar;
+            player.Animator = animator;
 
             var hud = world.AddComponent<HudController>();
             hud.Initialise(bootstrap, player);

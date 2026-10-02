@@ -75,7 +75,10 @@ Assets/Scripts/
 
 ## 素材来源
 
-全部 CC0，来自 [ambientCG](https://ambientcg.com)：
+角色为 Meshy AI 生成（银发街机风格幸存者），模型与动画为独立 FBX 导出，
+经 `SurvivorClipBaker` 重定向后烘焙进工程。
+
+其余贴图全部 CC0，来自 [ambientCG](https://ambientcg.com)：
 
 - `rust_Metal063.jpg` — Metal 063
 - `woodfloor_WoodFloor064.jpg` — Wood Floor 064
@@ -83,16 +86,35 @@ Assets/Scripts/
 - `concrete_Concrete034.jpg` — Concrete 034
 - `plaster_Plaster001.jpg` — Plaster 001
 
+### 角色动画管线
+
+Meshy 把角色和动画导出成两个互不兼容的 FBX，直接把动画套到角色上会失败。
+`SurvivorClipBaker`（菜单 `CrazyAquarium/Bake Survivor Animation`）负责解决：
+
+1. **曲线路径重映射** — 动画骨架叫 `target_character/mixamorig:Hips`，角色骨架叫
+   `Armature/Hips`。baker 按最长无歧义后缀匹配把每条曲线落到角色真实骨骼上。
+2. **绑定姿势差分重定向** — 两个骨架的静止姿势不同（`LeftArm` 在角色上是
+   `(352,240,2)`，在动画里是 `(59,180,344)`）。动画存的是绝对局部旋转，直接套用会
+   让双臂举过头顶、头部前俯。每条曲线按
+   `charRest * inverse(animRest) * src(t)` 换算。
+3. **烘焙为 `.anim` + AnimatorController** — FBX 里的 clip 是子资源，运行时无法按名
+   加载。baker 输出独立 `.anim` 和 `Survivor.controller`，运行时用 `Animator.Play`。
+
+烘焙后仍需**渲染验证**：路径全对、零未命中解析，也不代表姿势正确。绑定姿势错配
+只有出图才能发现。
+
 ## 已知问题
 
-- **玩家角色不可见**：角色没有渲染器，需要加一个可见代理
 - **画面偏暗**：环境光和雾需要调
 - **没有音效**
 - **斜撑效果在单跨度下不明显**：纯轴力模型不含弯曲刚度，见 `docs/research.md` 3.5.3
 - **没有存档**
+- **角色动画有少量骨骼未烘焙**：模型缺少 `LeftToe_End` 等末端辅助骨骼，
+  `Spine1` 与模型侧 `Spine01` 命名不一致，这部分脊柱与脚趾不动
 
 ## 文档
 
 - `docs/research.md` — 市场调研 + 策划案 + 技术验证实测数据
 - `docs/plan.md` — 待办计划、验收标准、风险登记
 - `docs/progress.md` — 环境事实、验证命令、bug 根因
+- `docs/unity-cli.md` — UnityCLI 实时调试用法

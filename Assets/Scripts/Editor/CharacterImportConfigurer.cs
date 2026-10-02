@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -24,6 +25,13 @@ namespace CrazyAquarium.EditorTools
     public static class CharacterImportConfigurer
     {
         private const string ArtRoot = "Assets/Art/Characters";
+
+        /// <summary>
+        /// The survivor also lives under Resources so it can be loaded at runtime,
+        /// which keeps the character replaceable without touching a scene file.
+        /// </summary>
+        private static readonly string[] ImportRoots = { ArtRoot, "Assets/Resources" };
+
         private const int MaxTextureSize = 2048;
 
         [MenuItem("CrazyAquarium/Configure Character Import Settings")]
@@ -32,15 +40,15 @@ namespace CrazyAquarium.EditorTools
             int models = 0;
             int textures = 0;
 
-            foreach (string path in AssetDatabase.FindAssets("t:Model", new[] { ArtRoot }))
+            foreach (string guid in AssetDatabase.FindAssets("t:Model", ImportRoots))
             {
-                ConfigureModel(path);
+                ConfigureModel(guid);
                 models++;
             }
 
-            foreach (string path in AssetDatabase.FindAssets("t:Texture2D", new[] { ArtRoot }))
+            foreach (string guid in AssetDatabase.FindAssets("t:Texture2D", ImportRoots))
             {
-                ConfigureTexture(path);
+                ConfigureTexture(guid);
                 textures++;
             }
 
@@ -55,12 +63,18 @@ namespace CrazyAquarium.EditorTools
             var importer = AssetImporter.GetAtPath(path) as ModelImporter;
             if (importer == null) return;
 
-            // Human height in metres. Meshy exports in centimetres by default, which
-            // is why an unconfigured character arrives 100x too tall.
-            importer.globalScale = 0.01f;
+            bool isAnimationClip = path.IndexOf("/Animations/", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            // Human height in metres. Blender measures this figure at 1.70 m, so it is
+            // already metric and must not be rescaled.
+            //
+            // The first pass set 0.01 on the assumption that Meshy exports in
+            // centimetres. That collapsed every vertex to zero, and Unity reported an
+            // 11123-vertex mesh whose bounds were all zero and which rendered
+            // nothing. Measuring beat assuming.
+            importer.globalScale = 1f;
             importer.useFileScale = true;
 
-            // Import everything so the skeleton, if present, is available later.
             importer.importCameras = false;
             importer.importLights = false;
             importer.importAnimation = true;
@@ -71,10 +85,16 @@ namespace CrazyAquarium.EditorTools
             importer.importNormals = ModelImporterNormals.Import;
             importer.importTangents = ModelImporterTangents.CalculateMikk;
 
-            // No material is imported: the runtime material library builds its own
-            // from the same textures, so a second material per character is pure
-            // overhead and a second place for the texture bindings to drift.
+            // Animation FBXs ship their own copy of the mesh and skeleton. Importing
+            // those as meshes would leave a duplicate, invisible body sitting in the
+            // scene next to the real one, so only the clips are taken from them.
             importer.materialImportMode = ModelImporterMaterialImportMode.None;
+
+            if (isAnimationClip)
+            {
+                importer.importVisibility = false;
+                importer.importCameras = false;
+            }
 
             importer.SaveAndReimport();
         }

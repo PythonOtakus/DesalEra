@@ -42,6 +42,12 @@ namespace CrazyAquarium.Unity
 
         public BuildPiece SelectedPiece => _selectedPiece;
 
+        /// <summary>The visible character, if one loaded.</summary>
+        public PlayerAvatar Avatar { get; set; }
+
+        /// <summary>The survivor's animation state, if clips were found.</summary>
+        public PlayerAnimator Animator { get; set; }
+
         /// <summary>Index into the build palette, for the HUD to highlight.</summary>
         public int SelectedIndex => _selectedIndex;
 
@@ -85,10 +91,20 @@ namespace CrazyAquarium.Unity
             }
 
             Vector3 move = (forward * v + right * h);
-            if (move.sqrMagnitude < 0.0001f) return;
+            if (move.sqrMagnitude < 0.0001f)
+            {
+                if (Animator != null) Animator.UpdateForSpeed(0f);
+                return;
+            }
             move.Normalize();
 
-            float speed = moveSpeed * (Input.GetKey(KeyCode.LeftShift) ? sprintMultiplier : 1f);
+            bool sprinting = Input.GetKey(KeyCode.LeftShift);
+            float speed = moveSpeed * (sprinting ? sprintMultiplier : 1f);
+
+            // Animation is driven from the speed actually applied, not from the input
+            // axes, so a walk into a wall does not keep the legs pumping.
+            if (Animator != null) Animator.UpdateForSpeed(speed);
+
             Vector3 next = transform.localPosition + move * (speed * Time.deltaTime);
 
             next.y = RaftState.BaseDeckY + 0.6f;
@@ -98,6 +114,11 @@ namespace CrazyAquarium.Unity
             float limit = walkRadiusCells * RaftState.CellSize;
             next.x = Mathf.Clamp(next.x, -limit, limit);
             next.z = Mathf.Clamp(next.z, -limit, limit);
+
+            // Turn the model to face the way it is travelling, so the character does
+            // not slide sideways. Kept separate from the transform: the controller
+            // owns position, the avatar owns orientation.
+            if (Avatar != null) Avatar.FaceTowards(move);
 
             transform.localPosition = next;
         }

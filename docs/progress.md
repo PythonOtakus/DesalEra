@@ -17,15 +17,46 @@
 | Unity 编译 | ✅ 零错误 |
 | EditMode 测试 | ✅ 75/75 通过 |
 | dotnet headless 测试 | ✅ 24/24 通过，约 40 ms |
-| **可执行文件构建** | ✅ `Builds/CrazyAquarium.exe` 70 MB |
+| **可执行文件构建** | ✅ `Builds/CrazyAquarium.exe` 90 MB（含角色资产） |
 | **实际运行验证** | ✅ 进程存活，渲染正常，HUD 工作，无异常 |
+| **玩家角色渲染** | ✅ 银发角色可见，74083 顶点，三张贴图全部绑定 |
+| **角色行走/奔跑动画** | ✅ Walk/Run 两态，Idle→Walk→Run→Idle 切换正确 |
 | 三维交叉支撑 | ✅ 已验证（直接刚度法） |
 | 刚架弯曲刚度（EI） | ❌ 未做，纯轴力模型 |
 | 失败恢复机制 | ⚠️ 仅有"死亡后重置"，无局部修复 |
 
 **灰盒玩法**：打捞残骸 → 建造（甲板/柱/浮筒/斜撑/淡化器）→ 应对周期风暴 → 生存值压制。全部运行时构建，场景文件仅 180 行。
 
-**已知问题**（见截图）：玩家角色不渲染、画面偏暗、无音效、无存档。
+**已知问题**（见截图）：画面偏暗、无音效、无存档、角色部分骨骼未烘焙。
+
+## 角色资产替换（2026-10-03）
+
+旧的中年男性 Meshy 资产已全部删除，替换为银发街机风格角色。
+
+| 项 | 值 |
+|---|---|
+| 源目录 | `C:\Users\Anantian\Downloads\Meshy_AI_Silver_Haired_Street__biped` |
+| 模型 | `Character_output.fbx`，74083 顶点，28 骨骼 |
+| 动画 | Walking 1.04 s、Running 0.67 s，各 350 条曲线 |
+| 贴图 | 4 张 2048×2048（Albedo / Normal / Roughness / Metallic） |
+| `globalScale` | 1（Blender 实测约 1.7 m，非厘米导出） |
+| 构建体积 | 70 MB → 90 MB |
+
+### 动画重定向：两个静默失败
+
+Meshy 把角色与动画导出成两个 FBX，直接套用会失败两次，两次都不会报错：
+
+1. **路径不匹配** — 动画骨架 `target_character/mixamorig:Hips`，角色骨架 `Armature/Hips`。
+   曲线路径全部落空，clip 在播放、时间在推进，但**一根骨骼都不动**。
+2. **绑定姿势不同** — `LeftArm` 静止角在角色是 `(352,240,2)`、动画是 `(59,180,344)`。
+   路径修好后姿势仍然错：双臂举过头顶、头部前俯。
+
+修法是 `charRest * inverse(animRest) * src(t)` 差分重定向，见
+`SurvivorClipBaker.cs`。**只有渲染出图才能发现第 2 类问题**——路径全对、
+零未命中解析时曲线看起来完全正常。
+
+途中还排除了 legacy `Animation` 组件：它的时间会累加到 494 s 而不循环，
+且不驱动骨骼。改用 Mecanim + 烘焙的 `AnimatorController`。
 
 ## 环境事实（已验证）
 
