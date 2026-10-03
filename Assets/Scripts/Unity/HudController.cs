@@ -81,6 +81,7 @@ namespace CrazyAquarium.Unity
 
             _line.Clear();
             _line.Append($"SURVIVOR   {s.Describe()}");
+            _line.Append($"   [{(_player.IsInWater ? "SWIMMING" : "ON DECK")}]");
             _line.Append($"\nSTORES     {raft.Inventory.Describe()}");
             _line.Append($"\nRAFT       {raft.SolveBuoyancy().NetVerticalForceKn,6:F0} kN spare"
                          + (raft.SolveBuoyancy().IsFloating ? "" : "  SINKS"));
@@ -116,6 +117,7 @@ namespace CrazyAquarium.Unity
 
             _line.Append($"\nLMB build   RMB dismantle   scroll change piece   SHIFT sprint   E ration");
             _line.Append("   * not affordable");
+            _line.Append("\nWASD walks the deck and swims in open water");
 
             GUI.Label(new Rect(area.x + 10f, area.y + 8f, area.width, area.height), _line.ToString(), _label);
         }

@@ -1,7 +1,10 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using CrazyAquarium.Structure;
 using UnityEngine;
+
+// UnityEngine also defines a physics Joint.
+using Joint = CrazyAquarium.Structure.Joint;
 
 namespace CrazyAquarium.Game
 {
@@ -361,6 +364,121 @@ namespace CrazyAquarium.Game
         public static Vector3 WorldOf(Vector2Int cell)
         {
             return new Vector3(cell.x * CellSize, BaseDeckY, cell.y * CellSize);
+        }
+
+        /// <summary>How far a joint may sit from deck level and still count as deck.</summary>
+        private const float DeckLevelTolerance = 0.35f;
+
+        /// <summary>How far outside the deck footprint the survivor still counts as aboard.</summary>
+        private const float DeckMargin = 0.6f;
+
+        /// <summary>
+        /// True when a world position is standing on the raft's deck.
+        ///
+        /// Tested against the deck's footprint rather than against its beams, because
+        /// beams are one-dimensional and the opening raft's deck is a 6 m perimeter frame
+        /// with nothing across the middle. Measuring to the beams reports the spawn point
+        /// -- the origin, the middle of the raft -- as open sea.
+        ///
+        /// The footprint is the convex hull of every joint at deck level, so it grows as
+        /// the player places deck. Testing a hull rather than a bounding box keeps the
+        /// corners honest for the rectangular growth this raft actually does.
+        /// </summary>
+        public bool IsOverDeck(Vector3 worldPos, float margin = DeckMargin)
+        {
+            List<Vector2> hull = DeckFootprint();
+            if (hull.Count < 3) return false;
+
+            var point = new Vector2(worldPos.x, worldPos.z);
+
+            // A point is inside a convex polygon when it is left of every directed edge.
+            bool inside = true;
+            for (int i = 0; i < hull.Count; i++)
+            {
+                Vector2 a = hull[i];
+                Vector2 b = hull[(i + 1) % hull.Count];
+                if (Cross(b - a, point - a) < 0f) { inside = false; break; }
+            }
+
+            if (inside) return true;
+
+            // Outside the hull, allow a step onto the edge. Without this the survivor would
+            // have to land exactly inside the outline to get back aboard.
+            for (int i = 0; i < hull.Count; i++)
+            {
+                Vector2 a = hull[i];
+                Vector2 b = hull[(i + 1) % hull.Count];
+                if (DistanceSqToSegment(point, a, b) <= margin * margin) return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// The deck's outline in the XZ plane, as a convex hull over deck-level joints.
+        ///
+        /// Columns, pontoons and braces do not contribute: their joints are not at deck
+        /// level, so this describes the horizontal walking surface and not the whole raft.
+        /// </summary>
+        public List<Vector2> DeckFootprint()
+        {
+            var points = new List<Vector2>();
+
+            foreach (Joint joint in Gravity.Joints)
+            {
+                if (Mathf.Abs(joint.Position.y - BaseDeckY) > DeckLevelTolerance) continue;
+                points.Add(new Vector2(joint.Position.x, joint.Position.z));
+            }
+
+            return ConvexHull(points);
+        }
+
+        private static float Cross(Vector2 a, Vector2 b) => a.x * b.y - a.y * b.x;
+
+        /// <summary>
+        /// Andrew's monotone chain. Small enough to keep here rather than take a geometry
+        /// dependency for one convex hull.
+        /// </summary>
+        private static List<Vector2> ConvexHull(List<Vector2> input)
+        {
+            var points = new List<Vector2>(input);
+            points.RemoveAll(p => float.IsNaN(p.x) || float.IsNaN(p.y));
+            if (points.Count < 3) return points;
+
+            points.Sort((a, b) => a.x == b.x ? a.y.CompareTo(b.y) : a.x.CompareTo(b.x));
+
+            var hull = new List<Vector2>(points.Count * 2);
+
+            foreach (Vector2 p in points)
+            {
+                while (hull.Count >= 2 && Cross(hull[hull.Count - 1] - hull[hull.Count - 2], p - hull[hull.Count - 2]) <= 0f)
+                    hull.RemoveAt(hull.Count - 1);
+                hull.Add(p);
+            }
+
+            int lower = hull.Count + 1;
+            for (int i = points.Count - 2; i >= 0; i--)
+            {
+                Vector2 p = points[i];
+                while (hull.Count >= lower && Cross(hull[hull.Count - 1] - hull[hull.Count - 2], p - hull[hull.Count - 2]) <= 0f)
+                    hull.RemoveAt(hull.Count - 1);
+                hull.Add(p);
+            }
+
+            hull.RemoveAt(hull.Count - 1);
+            return hull;
+        }
+
+        /// <summary>Squared distance from a point to a segment.</summary>
+        private static float DistanceSqToSegment(Vector2 point, Vector2 a, Vector2 b)
+        {
+            Vector2 ab = b - a;
+            float lengthSq = ab.sqrMagnitude;
+            if (lengthSq < 1e-6f) return (point - a).sqrMagnitude;
+
+            float t = Mathf.Clamp01(Vector2.Dot(point - a, ab) / lengthSq);
+            Vector2 closest = a + ab * t;
+            return (point - closest).sqrMagnitude;
         }
 
         /// <summary>Runs the wind analysis and returns the report for HUD display.</summary>
