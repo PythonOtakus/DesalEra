@@ -1,6 +1,6 @@
-using UnityEngine;
+﻿using UnityEngine;
 
-namespace CrazyAquarium.Game
+namespace DesalEra.Game
 {
     public enum Vital
     {

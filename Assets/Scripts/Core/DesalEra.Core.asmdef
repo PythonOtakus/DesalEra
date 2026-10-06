@@ -1,9 +1,7 @@
-{
-  "name": "CrazyAquarium.Unity",
-  "rootNamespace": "CrazyAquarium.Unity",
-  "references": [
-    "CrazyAquarium.Core"
-  ],
+﻿{
+  "name": "DesalEra.Core",
+  "rootNamespace": "DesalEra",
+  "references": [],
   "includePlatforms": [],
   "excludePlatforms": [],
   "allowUnsafeCode": false,

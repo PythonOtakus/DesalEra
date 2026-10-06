@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace CrazyAquarium.EditorTools
+namespace DesalEra.EditorTools
 {
     /// <summary>
     /// Configures the import settings for generated character assets.
@@ -20,7 +20,7 @@ namespace CrazyAquarium.EditorTools
     ///
     /// Run headless:
     ///   Unity.exe -batchmode -executeMethod
-    ///     CrazyAquarium.EditorTools.CharacterImportConfigurer.ConfigureAll
+    ///     DesalEra.EditorTools.CharacterImportConfigurer.ConfigureAll
     /// </summary>
     public static class CharacterImportConfigurer
     {
@@ -34,7 +34,7 @@ namespace CrazyAquarium.EditorTools
 
         private const int MaxTextureSize = 2048;
 
-        [MenuItem("CrazyAquarium/Configure Character Import Settings")]
+        [MenuItem("DesalEra/Configure Character Import Settings")]
         public static void ConfigureAll()
         {
             int models = 0;
@@ -54,7 +54,7 @@ namespace CrazyAquarium.EditorTools
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            Debug.Log($"[CrazyAquarium] configured {models} models and {textures} textures");
+            Debug.Log($"[DesalEra] configured {models} models and {textures} textures");
         }
 
         private static void ConfigureModel(string guid)

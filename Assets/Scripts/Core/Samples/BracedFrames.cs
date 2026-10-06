@@ -1,7 +1,7 @@
-using CrazyAquarium.Structure;
+﻿using DesalEra.Structure;
 using UnityEngine;
 
-namespace CrazyAquarium.Samples
+namespace DesalEra.Samples
 {
     /// <summary>
     /// Braced-frame fixtures for lateral analysis. These are 2D frames in the XY

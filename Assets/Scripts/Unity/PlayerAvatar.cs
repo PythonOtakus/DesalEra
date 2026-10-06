@@ -1,7 +1,7 @@
-using CrazyAquarium.Game;
+﻿using DesalEra.Game;
 using UnityEngine;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>
     /// Attaches the survivor model to the player.
@@ -54,7 +54,7 @@ namespace CrazyAquarium.Unity
             _model = Resources.Load<GameObject>(ResourcePath);
             if (_model == null)
             {
-                Debug.LogWarning($"[CrazyAquarium] survivor model not found at Resources/{ResourcePath}; " +
+                Debug.LogWarning($"[DesalEra] survivor model not found at Resources/{ResourcePath}; " +
                                  "the player will be invisible but the game stays playable");
                 return;
             }
@@ -73,7 +73,7 @@ namespace CrazyAquarium.Unity
             ApplyMaterial(_renderer);
 
             ModelHeightM = MeasureHeight(instance, _renderer, modelScale);
-            Debug.Log($"[CrazyAquarium] survivor loaded, skeleton {ModelHeightM:F2} m " +
+            Debug.Log($"[DesalEra] survivor loaded, skeleton {ModelHeightM:F2} m " +
                       $"(sole to head joint), mesh bounds {_renderer.bounds.size.y:F2} m " +
                       $"(includes hair and footwear)");
         }

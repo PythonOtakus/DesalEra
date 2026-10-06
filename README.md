@@ -1,4 +1,4 @@
-# CrazyAquarium / 狂涛纪元
+﻿# DesalEra / 淡化器纪元
 
 海平面上升后的海上生存建造。当前状态：**可玩的灰盒垂直切片**。
 
@@ -9,42 +9,50 @@
 **已构建的可执行文件**（70 MB）：
 
 ```
-Builds/CrazyAquarium.exe
+Builds/DesalEra.exe
 ```
 
 **从源码重新构建**：
 
 ```powershell
 $unity = "C:\Program Files\Unity\Hub\Editor\2022.3.62f3c1\Editor\Unity.exe"
-$proj = "C:\Users\Anantian\source\repos\CrazyAquarium"
+$proj = "C:\Users\Anantian\source\repos\DesalEra"
 
 & $unity -batchmode -nographics -quit -projectPath $proj `
-  -executeMethod CrazyAquarium.EditorTools.SceneBuilder.BuildPlayer `
+  -executeMethod DesalEra.EditorTools.SceneBuilder.BuildPlayer `
   -logFile "$env:TEMP\build.log"
 ```
 
-或者在编辑器里：菜单 `CrazyAquarium → Build Windows Player`。
+或者在编辑器里：菜单 `DesalEra → Build Windows Player`。
 
 ## 操作
+
+第三人称越肩视角，右键拖动转视角。
 
 | 键 | 作用 |
 |---|---|
 | WASD | 走动（相机相对）；走上甲板是走，走出甲板是游泳 |
-| Shift | 疾行 |
-| 滚轮 | 切换建造件 |
-| 左键 | 建造 |
-| 右键 | 拆除（返还一半材料） |
+| Shift | 疾行（水中无效） |
+| 右键拖动 | 转动视角 |
+| 滚轮 | 拉近／拉远 |
+| 1–5 | 选择建造件：甲板 / 支撑柱 / 浮筒 / 斜撑 / 蒸馏器 |
+| 左键 | 建造（需站在甲板上） |
+| 右键单击 | 拆除（返还一半材料） |
 | E | 吃一份口粮 |
+
+滚轮从"切换建造件"改为相机缩放，建造件移到数字键：一个输入只做一件事，
+而滚轮作为相机控制更值钱。
 
 ## 现在的玩法
 
-1. 木筏漂浮在水上，你在甲板上走动
-2. 走向漂浮的残骸自动打捞，获得木板/废料/金属/淡水/食物
-3. 用材料扩建：甲板、支撑柱、浮筒、斜撑、海水淡化器
+1. 木筏漂浮在水上，你在甲板上走动，走出甲板即下水游泳
+2. 游到漂浮的残骸处自动打捞，获得木板/废料/金属/淡水/食物
+3. 回到甲板用材料扩建：甲板、支撑柱、浮筒、斜撑、海水淡化器
 4. 建造会实时调用结构求解器 —— 浮力、风载、应力
-5. 生存值随时间下降：饥饿、缺水、体力、健康
-6. 周期性风暴，风载从 1.2 升到 14 kN/m，可能把结构吹垮
-7. 造得太重会下沉，构件会按应力从绿变红直到断裂
+5. 建甲板会真的扩大可走范围
+6. 生存值随时间下降：饥饿、缺水、体力、健康
+7. 周期性风暴，风载从 1.2 升到 14 kN/m，可能把结构吹垮
+8. 造得太重会下沉，构件会按应力从绿变红直到断裂
 
 ## 架构
 
@@ -60,12 +68,27 @@ Assets/Scripts/
 
 **关键约束：场景文件只有 180 行。** 整个世界（相机、灯光、海面、木筏、玩家）在运行时由代码生成。原因写在 `docs/progress.md` —— `.unity` 是 GUID 链接的 YAML，人和 agent 都难以可靠编辑。
 
+### 相机与移动
+
+`ThirdPersonCamera` 是第三人称环绕相机：右键拖动转视角，滚轮缩放，距离
+2.4–20 m，俯角 −14°–74°，带 0.6 m 偏肩偏移。
+
+不用锁定指针是刻意的。锁定指针是纯Third-person做法，但建造用左键放置，
+隐藏光标就无从下手。拖动转视角让双手都在鼠标上，左键保持可用。
+
+移动带**加减速**（加速 34 m/s²、减速 26 m/s²），不是瞬时启停。恒速移动
+一松键就停死，正是"光标操作建造游戏"的手感特征，而不是角色的手感。转向也
+只在真的在移动时发生——站着不动时朝目标方向转身是很常见也很干扰的破绽。
+
+已知缺口：世界里还没有任何碰撞体，所以相机的 SphereCast 遮挡拉近暂时不生效，
+角色也不会被木筏挡住。补碰撞体是下一步。
+
 ## 测试
 
 ```powershell
 # Unity EditMode
 & "C:\Program Files\Unity\Hub\Editor\2022.3.62f3c1\Editor\Unity.exe" -batchmode -nographics `
-  -runTests -testPlatform EditMode -projectPath "C:\Users\Anantian\source\repos\CrazyAquarium" `
+  -runTests -testPlatform EditMode -projectPath "C:\Users\Anantian\source\repos\DesalEra" `
   -testResults "$env:TEMP\results.xml" -logFile "$env:TEMP\tests.log"
 
 # 或纯 dotnet，约 40ms，不启动编辑器
@@ -89,7 +112,7 @@ Assets/Scripts/
 ### 角色动画管线
 
 Meshy 把角色和动画导出成一批互不兼容的 FBX，直接把动画套到角色上会失败。
-`SurvivorClipBaker`（菜单 `CrazyAquarium/Bake Survivor Animation`）负责解决：
+`SurvivorClipBaker`（菜单 `DesalEra/Bake Survivor Animation`）负责解决：
 
 1. **曲线路径重映射** — 动画骨架叫 `target_character/mixamorig:Hips`，角色骨架叫
    `Armature/Hips`。baker 按最长无歧义后缀匹配把每条曲线落到角色真实骨骼上。

@@ -1,4 +1,4 @@
-# UnityCLI 使用指南
+﻿# UnityCLI 使用指南
 
 ## 为什么用它
 
@@ -60,7 +60,7 @@ $cli = "C:\Users\Anantian\tools\unity-cli\unity-cli.exe"
 
 # 0. 启动编辑器并保持前台
 $unity = "C:\Program Files\Unity\Hub\Editor\2022.3.62f3c1\Editor\Unity.exe"
-$proj  = "C:\Users\Anantian\source\repos\CrazyAquarium"
+$proj  = "C:\Users\Anantian\source\repos\DesalEra"
 $p = Start-Process $unity -ArgumentList "-projectPath","`"$proj`"","-logFile","`"$env:TEMP\editor.log`"" -PassThru
 Start-Sleep -Seconds 60
 
@@ -90,7 +90,7 @@ Start-Sleep -Seconds 20
 
 # 5. 读状态
 $code = @'
-var b = UnityEngine.Object.FindObjectOfType<CrazyAquarium.Unity.GameBootstrap>();
+var b = UnityEngine.Object.FindObjectOfType<DesalEra.Unity.GameBootstrap>();
 var buoy = b.Raft.SolveBuoyancy();
 return $"pieces={b.Raft.MemberCount} float={buoy.IsFloating} spare={buoy.NetVerticalForceKn:F1}kN";
 '@
@@ -98,7 +98,7 @@ $code | & $cli exec
 
 # 6. 改参数，立刻观察（这是关键能力，无需重编译）
 $code = @'
-var b = UnityEngine.Object.FindObjectOfType<CrazyAquarium.Unity.GameBootstrap>();
+var b = UnityEngine.Object.FindObjectOfType<DesalEra.Unity.GameBootstrap>();
 b.Raft.WindLoadKnPerM = 40f;
 b.Reanalyse();
 var w = b.Raft.SolveWind();

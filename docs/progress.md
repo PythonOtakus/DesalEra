@@ -1,4 +1,4 @@
-# 项目进度
+﻿# 项目进度
 
 > 最后更新：2026-10-02
 >
@@ -17,7 +17,7 @@
 | Unity 编译 | ✅ 零错误 |
 | EditMode 测试 | ✅ 75/75 通过 |
 | dotnet headless 测试 | ✅ 24/24 通过，约 40 ms |
-| **可执行文件构建** | ✅ `Builds/CrazyAquarium.exe` 90 MB（含角色资产） |
+| **可执行文件构建** | ✅ `Builds/DesalEra.exe` 90 MB（含角色资产） |
 | **实际运行验证** | ✅ 进程存活，渲染正常，HUD 工作，无异常 |
 | **玩家角色渲染** | ✅ 银发角色可见，74083 顶点，三张贴图全部绑定 |
 | **角色行走/奔跑动画** | ✅ Walk/Run 两态，Idle→Walk→Run→Idle 切换正确 |
@@ -121,6 +121,35 @@ SwimForward 两个 clip 早已烘焙并接进图里，只差玩法。
 
 构建版实测：HUD 显示 `[SWIMMING]`，体力 100→76，角色游到开阔水面；75/75 测试通过。
 
+### 方向修正：固定视角 SLG → 第三人称（2026-10-03）
+
+交付后判定手感不对：原型本质是 SLG 而不是 3A 动作生存。根因单一而明确——
+`GameEntry.LateUpdate` 里的固定偏移相机 `(0,11,-12)` 加 LookAt。角色只能被俯视，
+构图永远不变，移动是恒速瞬时启停。
+
+改动：
+
+- **新增 `ThirdPersonCamera`**：右键拖动转视角、滚轮缩放（2.4–20 m）、俯角
+  −14°–74°、0.6 m 偏肩偏移、枢轴平滑跟随、遮挡时拉近（SphereCast）。
+  刻意**不用锁定指针**：建造靠左键放置，隐藏光标就无从下手；拖动转视角让双手
+  都在鼠标上。
+- **滚轮从"切换建造件"改为相机缩放**，建造件移到 1–5 数字键。一个输入只做一件事。
+- **移动带加减速**（加速 34、减速 26 m/s²）。恒速移动一松键就停死，是光标操作
+  建造游戏的手感特征。转向也只在真的在移动时发生。
+
+顺手修掉一个自己引入的缺陷：`Input.GetMouseButtonDown(1)` 与相机拖动共用右键，
+拆除会误触发。加了 `&& !Input.GetMouseButton(1)`——按下那一帧两者都为 true，
+所以必须等松开。
+
+**已知缺口**：世界里没有任何碰撞体，所以相机遮挡拉近不生效，角色也不会被木筏
+挡住。这是下一步第一优先。
+
+网格建造没有废弃：它是这个产品的第一大 USP，要改的是视角和手感，不是把建造变成
+动作游戏。方向与优先级记录在 `docs/plan.md` 第 0.0 节。
+
+构建版实测：右键拖动可转视角（能看到地平线与角色正面）、滚轮可缩放（角色明显变大）、
+建造正常。75/75 测试通过。
+
 ### 动画包接入（2026-10-03 追加）
 
 Downloads 里 10 个 Meshy 压缩包已全部解压进 `Assets/Art/Characters/Survivor/Animations/`：
@@ -207,10 +236,10 @@ clip 第 0 帧），这是授权姿势问题。
 ## 工程结构
 
 ```
-CrazyAquarium/
+DesalEra/
 ├── Assets/Scripts/
 │   ├── Core/                      # 求解器，无表现逻辑
-│   │   ├── CrazyAquarium.Core.asmdef
+│   │   ├── DesalEra.Core.asmdef
 │   │   ├── Structure/
 │   │   │   ├── Material.cs        # 材料参数、承载力、弹性模量
 │   │   │   ├── Member.cs          # 构件、节点、求解报告
@@ -220,7 +249,7 @@ CrazyAquarium/
 │   │       ├── Structures.cs      # 确定性测试夹具（筏架、塔、偏载筏）
 │   │       └── BracedFrames.cs    # 带斜撑的框架夹具
 │   ├── Unity/                     # 表现层
-│   │   ├── CrazyAquarium.Unity.asmdef
+│   │   ├── DesalEra.Unity.asmdef
 │   │   ├── StructureView.cs       # 按利用率染色
 │   │   └── StructurePrototype.cs  # 原型驱动，Inspector 可调
 │   ├── Editor/                    # 预留
@@ -241,7 +270,7 @@ CrazyAquarium/
 
 ```powershell
 $unity = "C:\Program Files\Unity\Hub\Editor\2022.3.62f3c1\Editor\Unity.exe"
-$proj = "C:\Users\Anantian\source\repos\CrazyAquarium"
+$proj = "C:\Users\Anantian\source\repos\DesalEra"
 $results = "$env:TEMP\unity_results.xml"
 $log = "$env:TEMP\unity_tests.log"
 
@@ -268,8 +297,8 @@ Get-Content $log | Select-String "error CS" | Select-Object -First 10
 # 一次性创建测试工程
 $tmp = "$env:TEMP\ca-tests"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
-$core = "C:\Users\Anantian\source\repos\CrazyAquarium\Assets\Scripts\Core"
-$tests = "C:\Users\Anantian\source\repos\CrazyAquarium\Assets\Scripts\Tests\EditMode"
+$core = "C:\Users\Anantian\source\repos\DesalEra\Assets\Scripts\Core"
+$tests = "C:\Users\Anantian\source\repos\DesalEra\Assets\Scripts\Tests\EditMode"
 $unityDll = "C:\Program Files\Unity\Hub\Editor\2022.3.62f3c1\Editor\Data\Managed\UnityEngine\UnityEngine.CoreModule.dll"
 
 $proj = @"

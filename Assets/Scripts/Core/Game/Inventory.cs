@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace CrazyAquarium.Game
+namespace DesalEra.Game
 {
     public enum ResourceKind
     {

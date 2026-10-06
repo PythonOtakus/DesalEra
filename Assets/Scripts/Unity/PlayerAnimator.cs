@@ -1,9 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Animations;
 using UnityEngine.Playables;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>
     /// Plays the survivor's clips through a Playables graph, choosing between them from
@@ -135,7 +135,7 @@ namespace CrazyAquarium.Unity
 
             if (missing.Count > 0)
             {
-                Debug.LogWarning("[CrazyAquarium] survivor clips missing for: " +
+                Debug.LogWarning("[DesalEra] survivor clips missing for: " +
                                  string.Join(", ", missing.ToArray()) +
                                  ". Re-run SurvivorClipBaker; those states will not play.");
             }
@@ -151,7 +151,7 @@ namespace CrazyAquarium.Unity
 
             if (!_graphBuilt)
             {
-                Debug.LogWarning("[CrazyAquarium] survivor has no locomotion clips; " +
+                Debug.LogWarning("[DesalEra] survivor has no locomotion clips; " +
                                  "the character will stand still but the game is unaffected");
                 return false;
             }

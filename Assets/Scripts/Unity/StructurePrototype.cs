@@ -1,9 +1,9 @@
-using System;
-using CrazyAquarium.Samples;
-using CrazyAquarium.Structure;
+﻿using System;
+using DesalEra.Samples;
+using DesalEra.Structure;
 using UnityEngine;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>
     /// Drives the feasibility prototype: builds a structure, solves it, draws the

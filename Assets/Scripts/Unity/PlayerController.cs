@@ -1,7 +1,7 @@
-﻿using CrazyAquarium.Game;
+﻿using DesalEra.Game;
 using UnityEngine;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>Where the survivor is standing relative to the raft.</summary>
     public enum LocomotionMode
@@ -28,9 +28,14 @@ namespace CrazyAquarium.Unity
     /// </summary>
     public sealed class PlayerController : MonoBehaviour
     {
-        [Header("Movement")]
+[Header("Movement")]
         [SerializeField] private float moveSpeed = 5.5f;
         [SerializeField] private float sprintMultiplier = 1.7f;
+
+        [Header("Acceleration")]
+        [Tooltip("Metres per second squared. Instant start and stop is the clearest tell of a fixed-camera builder.")]
+        [SerializeField] private float acceleration = 34f;
+        [SerializeField] private float deceleration = 26f;
 
         [Header("Swimming")]
         [Tooltip("Speed multiplier in the water. Swimming is slower than walking.")]
@@ -50,11 +55,12 @@ namespace CrazyAquarium.Unity
         private const float SwimEyeDepth = 0.25f;
 
         private GameBootstrap _world;
-        private Transform _cameraTransform;
+        private ThirdPersonCamera _camera;
 
         private BuildPiece _selectedPiece;
         private int _selectedIndex;
         private LocomotionMode _mode = LocomotionMode.OnDeck;
+        private Vector3 _velocity;
 
         private static readonly BuildPiece[] Palette =
         {
@@ -83,10 +89,10 @@ namespace CrazyAquarium.Unity
 
         public string StatusLine { get; private set; } = string.Empty;
 
-        public void Initialise(GameBootstrap world, Transform cameraTransform)
+public void Initialise(GameBootstrap world, ThirdPersonCamera camera)
         {
             _world = world;
-            _cameraTransform = cameraTransform;
+            _camera = camera;
             _selectedPiece = Palette[0];
 
             Vector3 spawn = RaftState.WorldOf(Vector2Int.zero) + Vector3.up * 0.6f;
@@ -110,51 +116,43 @@ private void Update()
             UpdateMode(transform.localPosition);
         }
 
-        private void HandleMovement()
+private void HandleMovement()
         {
-            // Camera-relative so the controls follow what the player sees rather than
-            // a fixed world axis, which is the usual first-session complaint.
+            // Camera-relative so the controls follow where the player is looking. The
+            // orbit camera supplies a flattened forward, so looking up does not tilt the
+            // movement plane into the ground.
             float h = Input.GetAxisRaw("Horizontal");
             float v = Input.GetAxisRaw("Vertical");
 
-            Vector3 forward = Vector3.forward;
-            Vector3 right = Vector3.right;
-            if (_cameraTransform != null)
-            {
-                forward = Vector3.ProjectOnPlane(_cameraTransform.forward, Vector3.up).normalized;
-                right = Vector3.ProjectOnPlane(_cameraTransform.right, Vector3.up).normalized;
-                if (forward.sqrMagnitude < 0.01f) forward = Vector3.forward;
-            }
+            Vector3 forward = _camera != null ? _camera.FlatForward : Vector3.forward;
+            Vector3 right = _camera != null ? _camera.FlatRight : Vector3.right;
 
-Vector3 move = (forward * v + right * h);
-            if (move.sqrMagnitude < 0.0001f)
-            {
-                // Idle differs by surface: standing still on deck uses the idle clip,
-                // treading water uses the swim idle.
-                if (Animator != null) ApplyLocomotionAnimation(0f);
-
-                // Height still has to follow the mode. Dismantling the deck under a
-                // survivor who is not moving switches them to swimming, and without this
-                // they would hang at deck height over open water.
-                Vector3 standing = transform.localPosition;
-                standing.y = SurfaceHeight();
-                transform.localPosition = standing;
-                return;
-            }
-            move.Normalize();
+            Vector3 wish = (forward * v + right * h);
+            bool hasInput = wish.sqrMagnitude > 0.0001f;
+            if (hasInput) wish.Normalize();
 
             bool swimming = _mode == LocomotionMode.InWater;
 
             // Sprint is a land skill. Letting the survivor sprint across open water would
             // make swimming a strictly worse deck and there would be no reason to build.
             bool sprinting = !swimming && Input.GetKey(KeyCode.LeftShift);
-            float speed = moveSpeed
-                        * (sprinting ? sprintMultiplier : 1f)
-                        * (swimming ? swimSpeedMultiplier : 1f);
+            float targetSpeed = moveSpeed
+                              * (sprinting ? sprintMultiplier : 1f)
+                              * (swimming ? swimSpeedMultiplier : 1f);
 
-            if (Animator != null) ApplyLocomotionAnimation(speed);
+            Vector3 targetVelocity = hasInput ? wish * targetSpeed : Vector3.zero;
 
-Vector3 next = transform.localPosition + move * (speed * Time.deltaTime);
+            // Ramp towards the target instead of snapping to it. Constant-velocity
+            // movement stops the instant a key is released, which is exactly the feel of
+            // a cursor-driven builder rather than a character.
+            float rate = hasInput ? acceleration : deceleration;
+            _velocity = Vector3.MoveTowards(_velocity, targetVelocity, rate * Time.deltaTime);
+
+            float actualSpeed = _velocity.magnitude;
+
+            if (Animator != null) ApplyLocomotionAnimation(actualSpeed);
+
+            Vector3 next = transform.localPosition + _velocity * Time.deltaTime;
             next.y = SurfaceHeight();
 
             // Confined to the sea. Swimming is unbounded otherwise, and drifting off the
@@ -165,12 +163,12 @@ Vector3 next = transform.localPosition + move * (speed * Time.deltaTime);
                 flat = flat.normalized * swimRadius;
                 next.x = flat.x;
                 next.z = flat.y;
+                _velocity = Vector3.zero;
             }
 
-            // Turn the model to face the way it is travelling, so the character does
-            // not slide sideways. Kept separate from the transform: the controller
-            // owns position, the avatar owns orientation.
-            if (Avatar != null) Avatar.FaceTowards(move);
+            // Turn the model towards travel, but only while actually moving: spinning to
+            // face a heading while standing still is a common and distracting tell.
+            if (Avatar != null && actualSpeed > 0.15f) Avatar.FaceTowards(_velocity);
 
             transform.localPosition = next;
         }
@@ -195,6 +193,11 @@ Vector3 next = transform.localPosition + move * (speed * Time.deltaTime);
         /// </summary>
         private void UpdateMode(Vector3 position)
         {
+            // The raft is built in GameBootstrap.Awake. Ordering between that and this
+            // frame's Update is not something to depend on, and throwing here would repeat
+            // every frame rather than once.
+            if (_world == null || _world.Raft == null) return;
+
             bool overDeck = _world.Raft.IsOverDeck(position);
 
             if (_mode == LocomotionMode.OnDeck && !overDeck)
@@ -225,18 +228,30 @@ Vector3 next = transform.localPosition + move * (speed * Time.deltaTime);
             Animator.UpdateForSpeed(speed);
         }
 
-        private void HandleBuildInput()
+private void HandleBuildInput()
         {
-            if (Input.mouseScrollDelta.y != 0f)
+            // Number keys rather than the wheel. The wheel is worth more as camera zoom,
+            // and one meaning per input beats a control that does two unrelated jobs.
+            for (int i = 0; i < Palette.Length; i++)
             {
-                int delta = (int)Mathf.Sign(Input.mouseScrollDelta.y);
-                _selectedIndex = Mathf.Clamp(_selectedIndex - delta, 0, Palette.Length - 1);
-                _selectedPiece = Palette[_selectedIndex];
+                if (Input.GetKeyDown(KeyCode.Alpha1 + i)) SelectPiece(i);
             }
 
             if (Input.GetMouseButtonDown(0) && _selectedPiece != null) TryBuild();
-            if (Input.GetMouseButtonDown(1)) TryDismantle();
+
+            // Dismantle shares the right button with look-drag, so the camera decides
+            // whether the press was a click.
+            if (_camera != null && _camera.ConsumeLookClick()) TryDismantle();
+
             if (Input.GetKeyDown(KeyCode.E)) EatRation();
+        }
+
+        private void SelectPiece(int index)
+        {
+            if (index < 0 || index >= Palette.Length) return;
+            _selectedIndex = index;
+            _selectedPiece = Palette[index];
+            StatusLine = $"Selected {_selectedPiece.Name}.";
         }
 
         private void TryBuild()
@@ -294,11 +309,12 @@ Vector3 next = transform.localPosition + move * (speed * Time.deltaTime);
         /// deck plane. Cheaper and more reliable than raycasting against every
         /// member, and it keeps placement aligned to the build grid.
         /// </summary>
-        private Vector2Int DeckCellUnderMouse()
+private Vector2Int DeckCellUnderMouse()
         {
-            if (_cameraTransform == null) return Vector2Int.zero;
+            Camera camera = Camera.main;
+            if (camera == null) return Vector2Int.zero;
 
-            Ray ray = _cameraTransform.GetComponent<Camera>().ScreenPointToRay(Input.mousePosition);
+            Ray ray = camera.ScreenPointToRay(Input.mousePosition);
             var plane = new Plane(Vector3.up, new Vector3(0f, RaftState.BaseDeckY, 0f));
 
             if (!plane.Raycast(ray, out float distance)) return Vector2Int.zero;

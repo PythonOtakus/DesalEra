@@ -1,6 +1,6 @@
-using UnityEngine;
+﻿using UnityEngine;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>
     /// Single entry point. Drop this on one empty GameObject in an otherwise empty
@@ -13,9 +13,7 @@ namespace CrazyAquarium.Unity
     public sealed class GameEntry : MonoBehaviour
     {
         [Header("Camera")]
-        [SerializeField] private Vector3 cameraOffset = new Vector3(0f, 11f, -12f);
-        [SerializeField] private float cameraFieldOfView = 55f;
-        [SerializeField] private float followLerp = 6f;
+        [SerializeField] private float cameraFieldOfView = 60f;
 
         [Header("Lighting")]
         [SerializeField] private Vector3 lightDirection = new Vector3(0.4f, -0.8f, 0.45f);
@@ -23,8 +21,7 @@ namespace CrazyAquarium.Unity
         [SerializeField] private Color fogColour = new Color(0.36f, 0.42f, 0.46f);
         [SerializeField] private float fogDensity = 0.018f;
 
-        private Transform _playerTransform;
-        private Camera _camera;
+        private ThirdPersonCamera _orbit;
 
         private void Awake()
         {
@@ -41,7 +38,6 @@ namespace CrazyAquarium.Unity
 
             var playerGo = new GameObject("Player");
             playerGo.transform.SetParent(world.transform, worldPositionStays: false);
-            _playerTransform = playerGo.transform;
 
             var player = playerGo.AddComponent<PlayerController>();
             var avatar = playerGo.AddComponent<PlayerAvatar>();
@@ -50,13 +46,16 @@ namespace CrazyAquarium.Unity
             // The camera must exist before the player initialises, because movement is
             // camera-relative and would otherwise fall back to a fixed world axis on
             // the first frame.
-            _camera = CreateCamera();
+            Camera camera = CreateCamera();
+            _orbit = world.AddComponent<ThirdPersonCamera>();
 
-            player.Initialise(bootstrap, _camera.transform);
+            player.Initialise(bootstrap, _orbit);
             avatar.Initialise(playerGo.transform);
             animator.Initialise();
             player.Avatar = avatar;
             player.Animator = animator;
+
+            _orbit.Initialise(playerGo.transform, camera);
 
             var hud = world.AddComponent<HudController>();
             hud.Initialise(bootstrap, player);
@@ -68,12 +67,12 @@ namespace CrazyAquarium.Unity
         {
             var cameraGo = new GameObject("MainCamera");
             cameraGo.tag = "MainCamera";
-            _camera = cameraGo.AddComponent<Camera>();
-            _camera.fieldOfView = cameraFieldOfView;
-            _camera.nearClipPlane = 0.3f;
-            _camera.farClipPlane = 400f;
+            Camera camera = cameraGo.AddComponent<Camera>();
+            camera.fieldOfView = cameraFieldOfView;
+            camera.nearClipPlane = 0.15f;
+            camera.farClipPlane = 400f;
             cameraGo.AddComponent<AudioListener>();
-            return _camera;
+            return camera;
         }
 
         /// <summary>
@@ -102,16 +101,6 @@ namespace CrazyAquarium.Unity
             sun.shadows = LightShadows.Soft;
 
             Camera.main.backgroundColor = skyColour;
-        }
-
-        private void LateUpdate()
-        {
-            if (_playerTransform == null || _camera == null) return;
-
-            Vector3 target = _playerTransform.position + cameraOffset;
-            _camera.transform.position = Vector3.Lerp(
-                _camera.transform.position, target, 1f - Mathf.Exp(-followLerp * Time.deltaTime));
-            _camera.transform.LookAt(_playerTransform.position + Vector3.up * 0.5f);
         }
     }
 }

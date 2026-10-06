@@ -1,6 +1,6 @@
-using System;
+﻿using System;
 
-namespace CrazyAquarium.Structure
+namespace DesalEra.Structure
 {
     /// <summary>
     /// Material presets for structural members.

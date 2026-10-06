@@ -1,12 +1,12 @@
-using System.Collections.Generic;
-using CrazyAquarium.Game;
-using CrazyAquarium.Structure;
+﻿using System.Collections.Generic;
+using DesalEra.Game;
+using DesalEra.Structure;
 using UnityEngine;
 
 // UnityEngine also defines a physics Joint.
-using Joint = CrazyAquarium.Structure.Joint;
+using Joint = DesalEra.Structure.Joint;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>
     /// Builds the entire playable scene at runtime: raft, sea, salvage pickups, player

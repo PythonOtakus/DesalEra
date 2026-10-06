@@ -1,9 +1,9 @@
-{
-  "name": "CrazyAquarium.Tests.EditMode",
-  "rootNamespace": "CrazyAquarium.Tests",
+﻿{
+  "name": "DesalEra.Tests.EditMode",
+  "rootNamespace": "DesalEra.Tests",
   "references": [
-    "CrazyAquarium.Core",
-    "CrazyAquarium.Unity",
+    "DesalEra.Core",
+    "DesalEra.Unity",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],

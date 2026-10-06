@@ -1,8 +1,8 @@
-using System;
-using CrazyAquarium.Structure;
+﻿using System;
+using DesalEra.Structure;
 using UnityEngine;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>
     /// Renders a <see cref="StructureSolver"/> as boxes, one per member,

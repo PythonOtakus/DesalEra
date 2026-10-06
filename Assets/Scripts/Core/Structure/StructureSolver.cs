@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace CrazyAquarium.Structure
+namespace DesalEra.Structure
 {
     /// <summary>
     /// The structural graph: joints, members, and the load/buoyancy solver.

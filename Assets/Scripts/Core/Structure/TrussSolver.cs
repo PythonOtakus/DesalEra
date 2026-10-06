@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace CrazyAquarium.Structure
+namespace DesalEra.Structure
 {
     public sealed class TrussReport
     {

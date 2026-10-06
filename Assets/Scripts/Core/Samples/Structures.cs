@@ -1,7 +1,7 @@
-using CrazyAquarium.Structure;
+﻿using DesalEra.Structure;
 using UnityEngine;
 
-namespace CrazyAquarium.Samples
+namespace DesalEra.Samples
 {
     /// <summary>
     /// Builders for the structure shapes the prototype needs to exercise the solver.

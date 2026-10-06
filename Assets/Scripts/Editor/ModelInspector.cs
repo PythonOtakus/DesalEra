@@ -1,8 +1,8 @@
-using System.Text;
+﻿using System.Text;
 using UnityEditor;
 using UnityEngine;
 
-namespace CrazyAquarium.EditorTools
+namespace DesalEra.EditorTools
 {
     /// <summary>
     /// Reports the real dimensions of an imported model so the import scale can be set
@@ -15,7 +15,7 @@ namespace CrazyAquarium.EditorTools
     /// </summary>
     public static class ModelInspector
     {
-        [MenuItem("CrazyAquarium/Report Model Bounds")]
+        [MenuItem("DesalEra/Report Model Bounds")]
         public static void ReportAll()
         {
             var report = new StringBuilder();
@@ -71,8 +71,8 @@ namespace CrazyAquarium.EditorTools
                 }
             }
 
-            Debug.Log("[CrazyAquarium] model report\n" + report);
-            Debug.Log("[CrazyAquarium] model report\n" + report);
+            Debug.Log("[DesalEra] model report\n" + report);
+            Debug.Log("[DesalEra] model report\n" + report);
         }
     }
 }

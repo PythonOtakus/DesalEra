@@ -1,14 +1,14 @@
-using System.Linq;
-using CrazyAquarium.Samples;
-using CrazyAquarium.Structure;
+﻿using System.Linq;
+using DesalEra.Samples;
+using DesalEra.Structure;
 using NUnit.Framework;
 using UnityEngine;
 
 // UnityEngine also defines a Joint, for physics. Aliased so an unqualified Joint in
 // this file always means a structural node.
-using Joint = CrazyAquarium.Structure.Joint;
+using Joint = DesalEra.Structure.Joint;
 
-namespace CrazyAquarium.Tests
+namespace DesalEra.Tests
 {
     /// <summary>
     /// Verifies that diagonal bracing works, which is the make-or-break question for

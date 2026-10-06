@@ -1,9 +1,9 @@
-{
-  "name": "CrazyAquarium.Editor",
-  "rootNamespace": "CrazyAquarium.EditorTools",
+﻿{
+  "name": "DesalEra.Editor",
+  "rootNamespace": "DesalEra.EditorTools",
   "references": [
-    "CrazyAquarium.Core",
-    "CrazyAquarium.Unity"
+    "DesalEra.Core",
+    "DesalEra.Unity"
   ],
   "includePlatforms": [
     "Editor"

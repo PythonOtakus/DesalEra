@@ -1,7 +1,7 @@
-using CrazyAquarium.Game;
+﻿using DesalEra.Game;
 using UnityEngine;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>
     /// A floating salvage pickup. Walks toward the raft when the player is close,

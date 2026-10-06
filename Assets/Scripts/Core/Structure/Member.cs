@@ -1,6 +1,6 @@
-using UnityEngine;
+﻿using UnityEngine;
 
-namespace CrazyAquarium.Structure
+namespace DesalEra.Structure
 {
     /// <summary>
     /// A structural member: a beam or column spanning two joints.

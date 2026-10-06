@@ -1,9 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text;
-using CrazyAquarium.Game;
+using DesalEra.Game;
 using UnityEngine;
 
-namespace CrazyAquarium.Unity
+namespace DesalEra.Unity
 {
     /// <summary>
     /// On-screen readout. Immediate-mode GUI, built entirely in code, because a Unity
@@ -115,9 +115,9 @@ namespace CrazyAquarium.Unity
                 _line.Append("  ");
             }
 
-            _line.Append($"\nLMB build   RMB dismantle   scroll change piece   SHIFT sprint   E ration");
+            _line.Append($"\n1-5 piece   LMB build   RMB dismantle   E ration   SHIFT sprint");
             _line.Append("   * not affordable");
-            _line.Append("\nWASD walks the deck and swims in open water");
+            _line.Append("\nRMB drag look   wheel zoom   WASD walk the deck, swim outside it");
 
             GUI.Label(new Rect(area.x + 10f, area.y + 8f, area.width, area.height), _line.ToString(), _label);
         }

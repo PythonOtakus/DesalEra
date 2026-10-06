@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
-using CrazyAquarium.Structure;
+using DesalEra.Structure;
 using UnityEngine;
 
 // UnityEngine also defines a physics Joint.
-using Joint = CrazyAquarium.Structure.Joint;
+using Joint = DesalEra.Structure.Joint;
 
-namespace CrazyAquarium.Game
+namespace DesalEra.Game
 {
     /// <summary>
     /// A placeable structural piece: what it costs, what it is made of, and how it

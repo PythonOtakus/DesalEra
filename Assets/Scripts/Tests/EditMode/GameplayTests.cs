@@ -1,12 +1,12 @@
-using CrazyAquarium.Game;
-using CrazyAquarium.Structure;
+﻿using DesalEra.Game;
+using DesalEra.Structure;
 using NUnit.Framework;
 using UnityEngine;
 
 // UnityEngine defines a physics Joint, and UnityEngine.Vector3 has no Round.
-using Joint = CrazyAquarium.Structure.Joint;
+using Joint = DesalEra.Structure.Joint;
 
-namespace CrazyAquarium.Tests
+namespace DesalEra.Tests
 {
     /// <summary>
     /// Tests for the playable loop: survival pressure, salvage economy, and building.

@@ -1,9 +1,9 @@
-using CrazyAquarium.Structure;
-using CrazyAquarium.Unity;
+﻿using DesalEra.Structure;
+using DesalEra.Unity;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CrazyAquarium.Tests
+namespace DesalEra.Tests
 {
     /// <summary>
     /// Tests for the presentation layer. The solver is covered elsewhere; what matters
@@ -88,7 +88,7 @@ namespace CrazyAquarium.Tests
             var host = new GameObject("viewHost");
             try
             {
-                StructureSolver solver = CrazyAquarium.Samples.Structures.Tower(levels: 4);
+                StructureSolver solver = DesalEra.Samples.Structures.Tower(levels: 4);
                 SolveReport report = solver.Solve();
 
                 var view = host.AddComponent<StructureView>();
@@ -110,7 +110,7 @@ namespace CrazyAquarium.Tests
             var host = new GameObject("viewHost");
             try
             {
-                StructureSolver solver = CrazyAquarium.Samples.Structures.Tower(
+                StructureSolver solver = DesalEra.Samples.Structures.Tower(
                     levels: 20, column: MaterialKind.Plastic);
                 SolveReport report = solver.SolveToEquilibrium();
 
@@ -136,7 +136,7 @@ namespace CrazyAquarium.Tests
             var host = new GameObject("viewHost");
             try
             {
-                StructureSolver solver = CrazyAquarium.Samples.Structures.Tower(levels: 5);
+                StructureSolver solver = DesalEra.Samples.Structures.Tower(levels: 5);
                 SolveReport report = solver.Solve();
 
                 var view = host.AddComponent<StructureView>();

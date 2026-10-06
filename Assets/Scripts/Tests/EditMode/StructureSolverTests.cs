@@ -1,9 +1,9 @@
-﻿using CrazyAquarium.Samples;
-using CrazyAquarium.Structure;
+﻿using DesalEra.Samples;
+using DesalEra.Structure;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace CrazyAquarium.Tests
+namespace DesalEra.Tests
 {
     /// <summary>
     /// Feasibility tests for the core claim of the design: a vertical floating

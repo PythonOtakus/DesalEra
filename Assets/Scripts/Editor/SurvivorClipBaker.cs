@@ -4,7 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 
-namespace CrazyAquarium.EditorTools
+namespace DesalEra.EditorTools
 {
     /// <summary>
     /// Bakes the survivor's animation clips from the Meshy FBX files into standalone
@@ -86,10 +86,10 @@ namespace CrazyAquarium.EditorTools
         /// The baked assets are generated output and are committed, so a fresh clone has
         /// working animation without needing an editor step first.
         /// </summary>
-        [MenuItem("CrazyAquarium/Bake Survivor Animation")]
+        [MenuItem("DesalEra/Bake Survivor Animation")]
         public static void BakeFromMenu()
         {
-            Debug.Log("[CrazyAquarium] " + BakeAll());
+            Debug.Log("[DesalEra] " + BakeAll());
         }
 
         public static string BakeAll()
@@ -102,7 +102,7 @@ namespace CrazyAquarium.EditorTools
             if (EditorApplication.isPlaying)
             {
                 const string message = "ABORTED: cannot bake while in play mode; exit play and re-run";
-                Debug.LogError("[CrazyAquarium] " + message);
+                Debug.LogError("[DesalEra] " + message);
                 return message;
             }
 
@@ -111,7 +111,7 @@ namespace CrazyAquarium.EditorTools
             var character = LoadRig(CharacterModelPath);
             if (character == null)
             {
-                Debug.LogError($"[CrazyAquarium] character model missing at {CharacterModelPath}");
+                Debug.LogError($"[DesalEra] character model missing at {CharacterModelPath}");
                 return "ABORTED: no character rig";
             }
 
