@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using DesalEra.Unity.Inspect;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -6,12 +7,8 @@ using UnityEngine.UI;
 namespace DesalEra.Unity.Ui
 {
     /// <summary>
-    /// Owns the canvas, the font and the screen registry, and builds the always-on HUD
-    /// layer. Nothing about the interface lives in the scene file.
-    ///
-    /// Scale is reference-resolution based rather than a raw pixels-per-unit canvas, so
-    /// the layout holds from a 1280-wide window to a 4K one without every metric being
-    /// re-tuned.
+    /// Canvas / 字库 / 屏幕注册 / 常驻 HUD，以及布局配置（Play 工作副本与保存）。
+    /// 界面不进场景文件；Play 后选 Hierarchy 的 <c>GameEntry/Ui</c> 微调布局。
     /// </summary>
     public sealed class UiRoot : MonoBehaviour
     {
@@ -61,28 +58,146 @@ namespace DesalEra.Unity.Ui
         private RectTransform _hud;
         private RectTransform _overlay;
 
-        /// <summary>Surviving stats, drawn above the always-on HUD.</summary>
+        [LabelText("布局配置资源", "Resources/UiLayoutSettings")]
+        [SerializeField] private UiLayoutSettings settings;
+
+        private UiLayoutSettings _working;
+
         public VitalRowView Vitals { get; private set; }
-
-        /// <summary>Situational states: sheltered, resting, storm.</summary>
         public StatusStripView Status { get; private set; }
-
-        /// <summary>The build bar along the bottom.</summary>
         public BuildBarView BuildBar { get; private set; }
-
-        /// <summary>The single-line feedback strip.</summary>
+        public ResourceStripView ResourceStrip { get; private set; }
+        public MiniMapView MiniMap { get; private set; }
         public NoticeView Notice { get; private set; }
+        public BuildReticleView Reticle { get; private set; }
+
+        /// <summary>HUD 当前布局（Play = 工作副本）。</summary>
+        public UiLayoutSettings Working => Application.isPlaying && _working != null ? _working : settings;
+
+        /// <summary>Fired after always-on HUD panels are rebuilt (layout Apply).</summary>
+        public event System.Action HudRebuilt;
+
+        /// <summary>
+        /// RebuildHud 前处于打开状态的 Overlay id；订阅方在 HudRebuilt 里据此重新打开，
+        /// 避免改布局参数时详情 / 背包被关掉。
+        /// </summary>
+        public string OverlayToReopen { get; private set; }
 
         /// <summary>Anything that must draw over the HUD, e.g. a modal panel.</summary>
         public RectTransform Overlay => _overlay;
 
         public Canvas Canvas => _canvas;
 
+        private bool CanSaveLayout =>
+            Application.isPlaying && settings != null && _working != null && _working != settings;
+
+        [OnInspectorInit]
+        private void InspectorInit() => EnsureSettings();
+
+        [InfoBox("Play 中可改下方参数。「保存设置」写入内存资源，退出 Play 时落盘（避免保存时甲板贴图被资源刷新打黑）。", InfoBoxType.None)]
+        [ShowInInspector]
+        [InlineEditor]
+        [LabelText("布局参数")]
+        [OnValueChanged(nameof(ApplyLayoutIfPlaying))]
+        private UiLayoutSettings LayoutForInspect => Working;
+
+        [Button("保存设置", SaveAssets = true)]
+        [EnableIf(nameof(CanSaveLayout))]
+        private void SaveLayoutDuringPlay()
+        {
+            if (!CanSaveLayout) return;
+            JsonUtility.FromJsonOverwrite(JsonUtility.ToJson(_working, prettyPrint: true), settings);
+            Debug.Log("[UiLayout] 已保存设置（退出 Play 时写入磁盘）→ " + settings.name);
+        }
+
+        private void ApplyLayoutIfPlaying()
+        {
+            if (!Application.isPlaying) return;
+            EnsureSettings();
+            UiLayout.Bind(Working);
+            RebuildHud();
+        }
+
         public void Initialise()
         {
+            EnsureSettings();
+            if (Application.isPlaying)
+            {
+                if (_working != null) Destroy(_working);
+                _working = Instantiate(settings);
+                _working.name = settings.name + " (Play)";
+                _working.hideFlags = HideFlags.DontSave;
+            }
+            UiLayout.Bind(Working);
+
             BuildCanvas();
             BuildLayers();
             BuildHud();
+        }
+
+        private void EnsureSettings()
+        {
+            if (settings != null) return;
+            settings = Resources.Load<UiLayoutSettings>(UiLayout.ResourcesPath);
+            if (settings == null)
+            {
+                settings = ScriptableObject.CreateInstance<UiLayoutSettings>();
+                settings.name = "UiLayoutSettings (runtime)";
+                Debug.LogWarning(
+                    "[UiLayout] 未找到 Resources/UiLayoutSettings，已使用内存默认值。" +
+                    "请通过菜单 DesalEra/UI/创建布局配置资源 创建。");
+            }
+        }
+
+        /// <summary>
+        /// 按当前布局重建常驻 HUD，并重建 Overlay（详情 / 背包）以应用新内边距与字号。
+        /// 若重建前有 Overlay 打开，通过 <see cref="OverlayToReopen"/> 让订阅方重新打开。
+        /// </summary>
+        public void RebuildHud()
+        {
+            OverlayToReopen = FindOpenOverlayId();
+            ClearOverlayScreens();
+
+            if (_hud == null) return;
+            for (int i = _hud.childCount - 1; i >= 0; i--)
+            {
+                Transform child = _hud.GetChild(i);
+                if (Application.isPlaying) Destroy(child.gameObject);
+                else DestroyImmediate(child.gameObject);
+            }
+
+            MiniMap = null;
+            Vitals = null;
+            Status = null;
+            BuildBar = null;
+            ResourceStrip = null;
+            Notice = null;
+            Reticle = null;
+
+            BuildHud();
+            HudRebuilt?.Invoke();
+            OverlayToReopen = null;
+        }
+
+        private string FindOpenOverlayId()
+        {
+            foreach (KeyValuePair<string, GameObject> entry in _screens)
+            {
+                if (entry.Value != null && entry.Value.activeSelf)
+                    return entry.Key;
+            }
+            return null;
+        }
+
+        private void ClearOverlayScreens()
+        {
+            foreach (KeyValuePair<string, GameObject> entry in _screens)
+            {
+                if (entry.Value == null) continue;
+                if (Application.isPlaying) Destroy(entry.Value);
+                else DestroyImmediate(entry.Value);
+            }
+            _screens.Clear();
         }
 
         private void BuildCanvas()
@@ -133,10 +248,13 @@ namespace DesalEra.Unity.Ui
 
         private void BuildHud()
         {
+            MiniMap = MiniMapView.Create(_hud);
             Vitals = VitalRowView.Create(_hud);
             Status = StatusStripView.Create(_hud);
             BuildBar = BuildBarView.Create(_hud);
+            ResourceStrip = ResourceStripView.Create(_hud);
             Notice = NoticeView.Create(_hud);
+            Reticle = BuildReticleView.Create(_hud);
         }
 
         /// <summary>
@@ -189,7 +307,17 @@ namespace DesalEra.Unity.Ui
 
         private void OnDestroy()
         {
+            if (_working != null)
+            {
+                if (Application.isPlaying) Destroy(_working);
+                else DestroyImmediate(_working);
+                _working = null;
+            }
+            UiLayout.ClearBind();
+
             UiSprites.Release();
+            UiFrame.Release();
+            UiSkins.Release();
 
             // Only a font taken from an OS face is ours. A builtin belongs to the engine
             // and survives, as do the Resources-loaded textures the material library owns.

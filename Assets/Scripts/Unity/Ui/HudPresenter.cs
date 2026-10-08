@@ -28,6 +28,7 @@ namespace DesalEra.Unity.Ui
             _ui = ui;
             _world = world;
             _player = player;
+            _ui.MiniMap?.Bind(world, player);
             _initialised = true;
         }
 
@@ -37,7 +38,14 @@ namespace DesalEra.Unity.Ui
 
             HandleHotkeys();
             _ui.Vitals.Refresh(_world.Raft.Survival, _world.Raft.Inventory);
+            if (_ui.ResourceStrip != null)
+            {
+                _ui.ResourceStrip.SetSelected(_player != null ? _player.SelectedPiece : null);
+                _ui.ResourceStrip.Refresh(_world.Raft.Inventory);
+            }
+            _ui.MiniMap?.Refresh();
             RefreshStatus();
+            RefreshReticle();
         }
 
         /// <summary>
@@ -68,6 +76,12 @@ namespace DesalEra.Unity.Ui
             _ui.ShowOnly(id);
             InventoryView pack = _ui.GetScreen<InventoryView>("pack");
             if (pack != null) pack.Refresh();
+            if (id == "materials" && _player != null && _world != null)
+            {
+                MaterialPickerView picker = _ui.GetScreen<MaterialPickerView>("materials");
+                if (picker != null && _player.SelectedPiece != null)
+                    picker.Open(_player.SelectedPiece, _world.Raft.Inventory);
+            }
             return "open " + id;
         }
 
@@ -86,8 +100,8 @@ namespace DesalEra.Unity.Ui
         }
 
         /// <summary>
-        /// The dock header says where the next piece goes and whether it can: storey,
-        /// facing, then the preview's verdict. A refusal is readable before the click.
+        /// The dock header says where the next piece goes: storey and facing. Legality
+        /// lives on the reticle so the player need not look at the dock to place.
         /// </summary>
         private void RefreshBuildContext()
         {
@@ -99,15 +113,28 @@ namespace DesalEra.Unity.Ui
                 _ui.BuildBar.SetContext(where + " · 回到甲板才能建造", UiTheme.TextMuted);
                 return;
             }
-            if (_player.PreviewPlan == null)
+            _ui.BuildBar.SetContext(where, UiTheme.Accent);
+        }
+
+        private void RefreshReticle()
+        {
+            if (_ui.Reticle == null || _player == null)
             {
-                _ui.BuildBar.SetContext(where, UiTheme.Accent);
+                _ui.Reticle?.Hide();
+                return;
+            }
+
+            if (_player.IsInWater || _player.PreviewPlan == null || _ui.AnyScreenOpen())
+            {
+                _ui.Reticle.Hide();
                 return;
             }
 
             string problem = _player.PreviewProblem;
-            _ui.BuildBar.SetContext(problem == null ? where + " · 可放置" : where + " · " + UiCopy.Notice(problem).TrimEnd('。'),
-                                    problem == null ? UiTheme.Good : UiTheme.Bad);
+            string shortReason = problem == null ? null : UiCopy.Notice(problem).TrimEnd('。');
+            if (shortReason != null && shortReason.Length > 18)
+                shortReason = shortReason.Substring(0, 18) + "…";
+            _ui.Reticle.Show(problem == null, shortReason);
         }
     }
 }

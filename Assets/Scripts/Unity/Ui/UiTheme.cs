@@ -19,30 +19,28 @@ namespace DesalEra.Unity.Ui
     {
         // --- surfaces ---
 
-        /// <summary>Panel fill. Dark enough that the world stays the brightest thing.</summary>
-        public static readonly Color Panel = new Color(0.10f, 0.115f, 0.125f, 0.94f);
+        /// <summary>Panel multiply (frame sprite is pre-coloured).</summary>
+        public static readonly Color Panel = new Color(1f, 1f, 1f, 0.92f);
 
-        /// <summary>A panel that sits above another panel.</summary>
-        public static readonly Color PanelRaised = new Color(0.145f, 0.160f, 0.172f, 0.97f);
+        public static readonly Color PanelRaised = new Color(1f, 1f, 1f, 0.96f);
 
-        /// <summary>Well or slot interior, e.g. an empty inventory cell.</summary>
-        public static readonly Color Well = new Color(0.055f, 0.065f, 0.072f, 0.90f);
+        public static readonly Color Well = new Color(0.08f, 0.06f, 0.04f, 0.92f);
 
-        /// <summary>Hairline used for separators and panel borders.</summary>
-        public static readonly Color Hairline = new Color(0.32f, 0.34f, 0.33f, 0.75f);
+        public static readonly Color MetalRim = new Color(0.35f, 0.32f, 0.28f, 0.95f);
 
-        // --- text ---
+        public static readonly Color Hairline = new Color(0.40f, 0.36f, 0.30f, 0.65f);
 
-        public static readonly Color TextPrimary = new Color(0.88f, 0.89f, 0.87f, 1f);
-        public static readonly Color TextMuted = new Color(0.56f, 0.59f, 0.58f, 1f);
-        public static readonly Color TextDisabled = new Color(0.38f, 0.40f, 0.40f, 0.85f);
+        // --- text (cream on timber, per build-ui-design) ---
 
-        // --- interaction ---
+        public static readonly Color TextPrimary = new Color(0.94f, 0.92f, 0.86f, 1f);
+        public static readonly Color TextMuted = new Color(0.62f, 0.58f, 0.50f, 1f);
+        public static readonly Color TextDisabled = new Color(0.42f, 0.40f, 0.38f, 0.85f);
 
-        /// <summary>Selected or hovered affordance. Cold, so it never reads as a resource.</summary>
-        public static readonly Color Accent = new Color(0.36f, 0.62f, 0.56f, 1f);
+        // --- interaction: warm gold selection (not teal) ---
 
-        public static readonly Color AccentDim = new Color(0.22f, 0.36f, 0.34f, 1f);
+        public static readonly Color Accent = new Color(0.86f, 0.68f, 0.28f, 1f);
+
+        public static readonly Color AccentDim = new Color(0.48f, 0.36f, 0.14f, 1f);
 
         /// <summary>Affordable / valid.</summary>
         public static readonly Color Good = new Color(0.42f, 0.68f, 0.44f, 1f);
@@ -63,6 +61,16 @@ namespace DesalEra.Unity.Ui
         public static readonly Color StressIntact = new Color(0.36f, 0.62f, 0.56f);
         public static readonly Color StressStrained = new Color(0.88f, 0.72f, 0.24f);
         public static readonly Color StressCritical = new Color(0.98f, 0.24f, 0.18f);
+
+        // --- vitals (industry-common mapping; do not reuse for selection) ---
+
+        public static readonly Color VitalFood = new Color(0.86f, 0.58f, 0.28f);
+        public static readonly Color VitalWater = new Color(0.38f, 0.68f, 0.88f);
+        public static readonly Color VitalHealth = new Color(0.86f, 0.30f, 0.28f);
+        public static readonly Color VitalStamina = new Color(0.46f, 0.74f, 0.42f);
+
+        /// <summary>Fraction below which a vital shows its numeric value.</summary>
+        public const float VitalNumberThreshold = 0.30f;
 
         // --- resources ---
         //
@@ -93,29 +101,29 @@ namespace DesalEra.Unity.Ui
             }
         }
 
-        // --- metrics, in reference-resolution units ---
+        // --- metrics (from UiLayoutSettings; tweak in Inspector / Play) ---
 
-        public const float PanelPadding = 14f;
-        public const float RowGap = 8f;
-        public const int CornerRadius = 6;
+        public static float PanelPadding => UiLayout.Active.panelPadding;
+        public static float RowGap => UiLayout.Active.rowGap;
+        public static int CornerRadius => UiLayout.Active.cornerRadius;
+        public static float ScreenMargin => UiLayout.Active.screenMargin;
 
-        public const int FontSmall = 18;
-        public const int FontBody = 22;
-        public const int FontHeading = 28;
-        public const int FontTitle = 34;
+        /// <summary>其它面板辅助字号；面板专用文字请用各 Foldout 里的 UiTextStyle。</summary>
+        public static int FontSmall => UiLayout.Active.otherSmall.size;
+        public static int FontBody => UiLayout.Active.otherBody.size;
+        public static int FontHeading => UiLayout.Active.resourceCount.size;
+        public static int FontTitle => UiLayout.Active.otherTitle.size;
 
-        /// <summary>Line height used by every vertical layout, so rows never disagree.</summary>
-        public const float RowHeight = 30f;
-        public const float ButtonHeight = 64f;
-        public const float SlotSize = 74f;
+        public static float RowHeight => UiLayout.Active.rowHeight;
+        public static float ButtonHeight => UiLayout.Active.buttonHeight;
+        public static float SlotSize => UiLayout.Active.slotSize;
+        public static float BuildSlot => UiLayout.Active.buildSlot;
+        public static float BuildDockHeight => UiLayout.Active.buildDockHeight;
+        public static Vector2 VitalsSize => UiLayout.Active.vitalsSize;
+        public static float MinimapSize => UiLayout.Active.minimapSide;
+        public static int SpriteBorder => UiLayout.Active.spriteBorder;
 
-        /// <summary>Square build carousel cell. Large enough that the icon reads at a glance.</summary>
-        public const float BuildSlot = 92f;
-
-        /// <summary>Bottom dock height for the build carousel (Genshin / Valheim style).</summary>
-        public const float BuildDockHeight = 148f;
-
-        /// <summary>How thick a generated 9-sliced border is, in sprite texels.</summary>
-        public const int SpriteBorder = 10;
+        /// <summary>Outline colour for always-on labels against bright sea glare.</summary>
+        public static readonly Color TextOutline = new Color(0.02f, 0.03f, 0.04f, 0.85f);
     }
 }

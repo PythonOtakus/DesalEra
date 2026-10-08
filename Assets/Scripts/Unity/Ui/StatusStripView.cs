@@ -47,8 +47,9 @@ namespace DesalEra.Unity.Ui
             _row.anchorMin = new Vector2(1f, 1f);
             _row.anchorMax = new Vector2(1f, 1f);
             _row.pivot = new Vector2(1f, 1f);
-            _row.sizeDelta = new Vector2(560f, 34f);
-            _row.anchoredPosition = new Vector2(-UiTheme.PanelPadding, -UiTheme.PanelPadding);
+            _row.sizeDelta = new Vector2(420f, 34f);
+            // Sit under the top margin, clear of the notice toast.
+            _row.anchoredPosition = new Vector2(-UiTheme.ScreenMargin, -UiTheme.ScreenMargin - 44f);
 
             // Right-aligned, so the strip grows leftwards out of the corner instead of
             // shifting every chip across the screen when one appears.
@@ -68,7 +69,8 @@ namespace DesalEra.Unity.Ui
             element.preferredWidth = 210f;
             element.preferredHeight = 32f;
 
-            chip.Background = UiFactory.Sprite(root, UiSprites.Panel(), UiTheme.PanelRaised);
+            chip.Background = UiFactory.ThemedSlot(root);
+            UiFactory.Stretch(chip.Background.rectTransform);
             UiFactory.Stretch(chip.Background.rectTransform);
 
             Image dot = UiFactory.Sprite(chip.Background.transform, UiSprites.Circle(14), tone, Image.Type.Simple);

@@ -1,0 +1,172 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b68fbab9b194dff418e00d2bf27d567f, type: 3}
+  m_Name: UiLayoutSettings
+  m_EditorClassIdentifier: 
+  screenMargin: 24
+  bottomY: 28
+  referenceWidth: 1920
+  minimapSide: 320
+  padMinimap:
+    left: 0.11
+    bottom: 0.14
+    right: 0.11
+    top: 0.11
+  minimapNorth:
+    size: 22
+    lineSpacing: 1
+    alignment: 4
+    bold: 1
+    preferredHeight: 0
+  minimapWave:
+    size: 22
+    lineSpacing: 1
+    alignment: 4
+    bold: 0
+    preferredHeight: 0
+  buildBarWidth: 800
+  padProductList:
+    left: 0.02
+    bottom: 0.05
+    right: 0.02
+    top: 0.11
+  hintY: 6
+  categoryGap: 6
+  buildDockHeight: 160
+  buildSlot: 92
+  buildCategory:
+    size: 18
+    lineSpacing: 1
+    alignment: 3
+    bold: 0
+    preferredHeight: 0
+  buildHint:
+    size: 18
+    lineSpacing: 1
+    alignment: 3
+    bold: 0
+    preferredHeight: 0
+  buildCardTitle:
+    size: 18
+    lineSpacing: 1
+    alignment: 1
+    bold: 0
+    preferredHeight: 0
+  buildCardBadge:
+    size: 14
+    lineSpacing: 1
+    alignment: 4
+    bold: 0
+    preferredHeight: 0
+  statusWidth: 360
+  padStatus:
+    left: 0.07
+    bottom: 0.14
+    right: 0.07
+    top: 0.14
+  vitalsSize: {x: 400, y: 170}
+  statusRowSpacing: 6
+  statusItemSpacing: 6
+  statusLabel:
+    size: 22
+    lineSpacing: 1
+    alignment: 3
+    bold: 0
+    preferredHeight: 0
+  statusNumber:
+    size: 18
+    lineSpacing: 1
+    alignment: 5
+    bold: 0
+    preferredHeight: 0
+  resourceWidth: 400
+  padMaterialList:
+    left: 0.035
+    bottom: 0.12
+    right: 0.035
+    top: 0.12
+  resourceCount:
+    size: 28
+    lineSpacing: 1
+    alignment: 4
+    bold: 0
+    preferredHeight: 0
+  detailWidth: 460
+  padDetail:
+    left: 0.184
+    bottom: 0.07
+    right: 0.09
+    top: 0.025
+  detailStackSpacing: 10
+  detailRowHeight: 76
+  detailRowSpacing: 8
+  detailTitle:
+    size: 36
+    lineSpacing: 1
+    alignment: 4
+    bold: 1
+    preferredHeight: 52
+  detailWarning:
+    size: 22
+    lineSpacing: 1
+    alignment: 3
+    bold: 0
+    preferredHeight: 52
+  detailCost:
+    size: 28
+    lineSpacing: 1
+    alignment: 3
+    bold: 0
+    preferredHeight: 40
+  detailRowTitle:
+    size: 22
+    lineSpacing: 1
+    alignment: 3
+    bold: 0
+    preferredHeight: 0
+  detailRowSub:
+    size: 20
+    lineSpacing: 1
+    alignment: 3
+    bold: 0
+    preferredHeight: 0
+  detailHint:
+    size: 18
+    lineSpacing: 1
+    alignment: 3
+    bold: 0
+    preferredHeight: 28
+  otherTitle:
+    size: 36
+    lineSpacing: 1
+    alignment: 0
+    bold: 1
+    preferredHeight: 0
+  otherBody:
+    size: 22
+    lineSpacing: 1
+    alignment: 0
+    bold: 0
+    preferredHeight: 0
+  otherSmall:
+    size: 18
+    lineSpacing: 1
+    alignment: 0
+    bold: 0
+    preferredHeight: 0
+  panelPadding: 18
+  rowGap: 8
+  cornerRadius: 8
+  rowHeight: 32
+  buttonHeight: 72
+  slotSize: 88
+  spriteBorder: 12

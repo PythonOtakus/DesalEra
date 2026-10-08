@@ -29,6 +29,7 @@ namespace DesalEra.Unity
         private GameBootstrap _world;
         private PlayerController _player;
         private Ui.UiRoot _ui;
+        private bool _hudEventsHooked;
 
         private void Awake()
         {
@@ -54,9 +55,41 @@ namespace DesalEra.Unity
             _ui = uiGo.AddComponent<Ui.UiRoot>();
             _ui.Initialise();
 
+            // Layout Apply rebuilds HUD panels — re-wire dock / status after each rebuild.
+            _ui.HudRebuilt += WireHudAfterRebuild;
+
+            WireHudBindings();
+
+            // The per-frame part of the HUD lives in its own component so this method stays
+            // about wiring rather than about what happens sixty times a second.
+            uiGo.AddComponent<Ui.HudPresenter>().Initialise(_ui, _world, _player);
+        }
+
+        private void WireHudAfterRebuild()
+        {
+            string reopen = _ui != null ? _ui.OverlayToReopen : null;
+            WireHudBindings();
+            var presenter = _ui != null ? _ui.GetComponent<Ui.HudPresenter>() : null;
+            presenter?.Initialise(_ui, _world, _player);
+            RestoreOverlayAfterRebuild(reopen);
+        }
+
+        private void RestoreOverlayAfterRebuild(string id)
+        {
+            if (_ui == null || string.IsNullOrEmpty(id)) return;
+            var presenter = _ui.GetComponent<Ui.HudPresenter>();
+            if (presenter != null)
+                presenter.ShowPanel(id);
+            else
+                _ui.ShowOnly(id);
+        }
+
+        private void WireHudBindings()
+        {
             var ui = _ui;
             var world = _world;
             var player = _player;
+            if (ui == null || world == null || player == null) return;
 
             Ui.InventoryView pack = ui.Screen("pack", () => Ui.InventoryView.Create(ui.Overlay));
             Ui.MaterialPickerView picker = ui.Screen("materials", () => Ui.MaterialPickerView.Create(ui.Overlay));
@@ -73,29 +106,39 @@ namespace DesalEra.Unity
             ui.Status.Declare("sheltered", "有遮蔽", Ui.UiTheme.Accent);
             ui.Status.Declare("storm", "风暴", Ui.UiTheme.Warn);
 
-            // Selecting a piece reports through the status line, so this also keeps the
-            // dock's highlight on the piece the hotkeys or CLI just picked.
-            player.StatusChanged += message =>
+            // Inventory / status events are subscribed once on the world/player; handlers
+            // always read the current ui.BuildBar reference so rebuilds stay wired.
+            if (!_hudEventsHooked)
             {
-                ui.Notice.Show(Ui.UiCopy.Notice(message), Ui.UiTheme.TextPrimary);
-                ui.BuildBar.Refresh(world.Raft.Inventory, player.SelectedPiece);
-            };
+                _hudEventsHooked = true;
+                player.StatusChanged += message =>
+                {
+                    if (_ui == null) return;
+                    string notice = Ui.UiCopy.Notice(message);
+                    if (!string.IsNullOrEmpty(notice) && !notice.StartsWith("已选择")
+                        && !notice.StartsWith("Selected"))
+                        _ui.Notice.Show(notice, Ui.UiTheme.TextPrimary);
+                    _ui.BuildBar.Refresh(world.Raft.Inventory, player.SelectedPiece);
+                    _ui.ResourceStrip?.SetSelected(player.SelectedPiece);
+                    _ui.ResourceStrip?.Refresh(world.Raft.Inventory);
+                };
 
-            world.Raft.Inventory.Changed += (_, __) =>
-            {
-                ui.BuildBar.Refresh(world.Raft.Inventory, player.SelectedPiece);
-                pack.Refresh();
-            };
+                world.Raft.Inventory.Changed += (_, __) =>
+                {
+                    if (_ui == null) return;
+                    _ui.BuildBar.Refresh(world.Raft.Inventory, player.SelectedPiece);
+                    _ui.ResourceStrip?.Refresh(world.Raft.Inventory);
+                    _ui.GetScreen<Ui.InventoryView>("pack")?.Refresh();
+                };
+            }
 
             ui.BuildBar.Refresh(world.Raft.Inventory, player.SelectedPiece);
+            ui.ResourceStrip?.SetSelected(player.SelectedPiece);
+            ui.ResourceStrip?.Refresh(world.Raft.Inventory);
             pack.Refresh();
-
-            // The per-frame part of the HUD lives in its own component so this method stays
-            // about wiring rather than about what happens sixty times a second.
-            uiGo.AddComponent<Ui.HudPresenter>().Initialise(ui, world, player);
         }
 
-private void BuildWorld()
+        private void BuildWorld()
         {
             var world = new GameObject("World");
             _world = world.AddComponent<GameBootstrap>();

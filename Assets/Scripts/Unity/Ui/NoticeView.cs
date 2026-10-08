@@ -3,13 +3,7 @@ using UnityEngine.UI;
 
 namespace DesalEra.Unity.Ui
 {
-    /// <summary>
-    /// The one-line feedback strip, and the only part of the old text HUD kept as text.
-    ///
-    /// It fades after a couple of seconds rather than sitting on screen forever. A message
-    /// that never disappears is read once and then becomes wallpaper, and the player stops
-    /// noticing the refusals that matter.
-    /// </summary>
+    /// <summary>Top-centre temporary toast — fades after a few seconds.</summary>
     public sealed class NoticeView : MonoBehaviour
     {
         private const float HoldSeconds = 2.6f;
@@ -24,7 +18,6 @@ namespace DesalEra.Unity.Ui
         {
             var go = new GameObject("Notice", typeof(RectTransform));
             go.transform.SetParent(parent, worldPositionStays: false);
-
             var view = go.AddComponent<NoticeView>();
             view.Build();
             return view;
@@ -34,17 +27,15 @@ namespace DesalEra.Unity.Ui
         {
             UiFactory.FillParent(transform);
 
-            // Sit just above the build dock so toasts never compete with the placement ghost.
-            _background = UiFactory.Sprite(transform, UiSprites.Panel(), UiTheme.PanelRaised);
-            UiFactory.Anchor(_background.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                             new Vector2(0f, UiTheme.BuildDockHeight + 40f), new Vector2(640f, 36f));
+            // Mock toast is a thin dark pill — not a riveted plate.
+            _background = UiFactory.Sprite(transform, UiSprites.Panel(),
+                                           new Color(0.06f, 0.05f, 0.04f, 0.82f));
+            UiFactory.Anchor(_background.rectTransform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                             new Vector2(0f, -UiTheme.ScreenMargin), new Vector2(520f, 36f));
 
-            Image border = UiFactory.Sprite(_background.transform, UiSprites.Outline(), UiTheme.Hairline);
-            UiFactory.Stretch(border.rectTransform);
-            border.raycastTarget = false;
-
-            _label = UiFactory.Text(_background.transform, string.Empty, UiTheme.FontBody,
-                                    UiTheme.TextPrimary, TextAnchor.MiddleCenter);
+            var noticeStyle = UiLayout.Active.otherBody;
+            noticeStyle.alignment = TextAnchor.MiddleCenter;
+            _label = UiFactory.Text(_background.transform, string.Empty, noticeStyle, UiTheme.TextPrimary);
             _label.rectTransform.offsetMin = new Vector2(12f, 0f);
             _label.rectTransform.offsetMax = new Vector2(-12f, 0f);
 
@@ -54,39 +45,43 @@ namespace DesalEra.Unity.Ui
         public void Show(string message, Color tone)
         {
             if (string.IsNullOrEmpty(message)) return;
-
             _label.text = message;
             _label.color = tone;
             _shownAt = Time.unscaledTime;
             _visible = true;
             gameObject.SetActive(true);
+            SetAlpha(1f);
         }
 
         private void Update()
         {
             if (!_visible) return;
-
             float age = Time.unscaledTime - _shownAt;
             if (age < HoldSeconds) return;
-
-            float fade = Mathf.Clamp01((age - HoldSeconds) / FadeSeconds);
-            var colour = _background.color;
-            colour.a = Mathf.Lerp(0.97f, 0f, fade);
-            _background.color = colour;
-
-            if (fade >= 1f)
+            float t = (age - HoldSeconds) / FadeSeconds;
+            if (t >= 1f)
             {
                 _visible = false;
                 gameObject.SetActive(false);
-                _background.color = UiTheme.PanelRaised;
+                return;
             }
+            SetAlpha(1f - t);
         }
 
-        /// <summary>Clears immediately, for a mode change that invalidates the message.</summary>
-        public void Clear()
+        private void SetAlpha(float a)
         {
-            _visible = false;
-            gameObject.SetActive(false);
+            if (_background != null)
+            {
+                Color c = _background.color;
+                c.a = a;
+                _background.color = c;
+            }
+            if (_label != null)
+            {
+                Color c = _label.color;
+                c.a = a;
+                _label.color = c;
+            }
         }
     }
 }

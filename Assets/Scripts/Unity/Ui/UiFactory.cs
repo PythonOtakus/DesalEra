@@ -54,17 +54,17 @@ namespace DesalEra.Unity.Ui
         }
 
         /// <summary>
-        /// A background panel with a hairline border. Returns the content rect to fill,
+        /// A background panel with a metal rim. Returns the content rect to fill,
         /// because callers should never have to know how much padding a panel ate.
         /// </summary>
         public static RectTransform Panel(Transform parent, string name, Color fill, out Image background)
         {
-            background = Sprite(parent, UiSprites.Panel(), fill);
+            // Tiled wood fill (sharp grain) + nine-sliced riveted rim over it.
+            background = Sprite(parent, UiFrame.WoodTile(), new Color(1f, 1f, 1f, fill.a), Image.Type.Tiled);
             Stretch(background.rectTransform);
-
-            var border = Sprite(background.transform, UiSprites.Outline(), UiTheme.Hairline);
-            Stretch(border.rectTransform);
-            border.raycastTarget = false;
+            var rimImg = Sprite(background.transform, UiFrame.Framed(), Color.white);
+            Stretch(rimImg.rectTransform);
+            rimImg.raycastTarget = false;
 
             var content = Container(background.transform, name);
             var inset = UiTheme.PanelPadding;
@@ -73,11 +73,39 @@ namespace DesalEra.Unity.Ui
             return content;
         }
 
+        /// <summary>Tiled timber + riveted rim from StreamingAssets maps.</summary>
+        public static Image ThemedPanel(Transform parent, out Image rim)
+        {
+            Image wood = Sprite(parent, UiFrame.WoodTile(), Color.white, Image.Type.Tiled);
+            rim = Sprite(wood.transform, UiFrame.Framed(), Color.white);
+            Stretch(rim.rectTransform);
+            rim.raycastTarget = false;
+            return wood;
+        }
+
+        /// <summary>
+        /// Inner timber plate — no riveted rim. Outer shells use <see cref="ThemedPanel"/>.
+        /// </summary>
+        public static Image ThemedSlot(Transform parent)
+        {
+            return Sprite(parent, UiFrame.WoodTile(), Color.white, Image.Type.Tiled);
+        }
+
         /// <summary>
         /// A text label. When <paramref name="lowerHalf"/> is set the label takes the
         /// bottom half of its parent, which is how a button stacks a title over a cost
         /// line without either of them knowing the other's size.
         /// </summary>
+        /// <summary>用 <see cref="UiTextStyle"/> 创建文字（字号 / 行距 / 对齐 / 加粗）。</summary>
+        public static Text Text(Transform parent, string text, in UiTextStyle style, Color color,
+                                float leftInset = 0f, bool lowerHalf = false)
+        {
+            Text label = Text(parent, text, style.size, color, style.alignment, leftInset, lowerHalf);
+            style.ApplyTo(label);
+            style.ApplyPreferredHeight(label.gameObject);
+            return label;
+        }
+
         public static Text Text(Transform parent, string text, int size, Color color,
                                 TextAnchor anchor = TextAnchor.UpperLeft,
                                 float leftInset = 0f, bool lowerHalf = false)
@@ -95,6 +123,16 @@ namespace DesalEra.Unity.Ui
             label.verticalOverflow = VerticalWrapMode.Truncate;
             label.raycastTarget = false;
             label.supportRichText = true;
+
+            // Outline + soft shadow for sea glare and overcast sky alike.
+            var outline = go.AddComponent<Outline>();
+            outline.effectColor = UiTheme.TextOutline;
+            outline.effectDistance = new Vector2(1f, -1f);
+            outline.useGraphicAlpha = true;
+            var shadow = go.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0f, 0f, 0f, 0.45f);
+            shadow.effectDistance = new Vector2(1.5f, -1.5f);
+            shadow.useGraphicAlpha = true;
 
             var rect = label.rectTransform;
             if (lowerHalf)
@@ -114,9 +152,10 @@ namespace DesalEra.Unity.Ui
         }
 
         /// <summary>A vertical stack with consistent spacing and child alignment.</summary>
-        public static VerticalLayoutGroup Vertical(Transform parent, float spacing = UiTheme.RowGap,
+        public static VerticalLayoutGroup Vertical(Transform parent, float spacing = -1f,
                                                    RectOffset padding = null, bool grow = true)
         {
+            if (spacing < 0f) spacing = UiTheme.RowGap;
             var layout = parent.gameObject.AddComponent<VerticalLayoutGroup>();
             layout.spacing = spacing;
             layout.padding = padding ?? new RectOffset(0, 0, 0, 0);
@@ -128,9 +167,10 @@ namespace DesalEra.Unity.Ui
             return layout;
         }
 
-        public static HorizontalLayoutGroup Horizontal(Transform parent, float spacing = UiTheme.RowGap,
+        public static HorizontalLayoutGroup Horizontal(Transform parent, float spacing = -1f,
                                                        RectOffset padding = null, bool grow = false)
         {
+            if (spacing < 0f) spacing = UiTheme.RowGap;
             var layout = parent.gameObject.AddComponent<HorizontalLayoutGroup>();
             layout.spacing = spacing;
             layout.padding = padding ?? new RectOffset(0, 0, 0, 0);

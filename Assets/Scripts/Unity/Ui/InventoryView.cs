@@ -53,20 +53,17 @@ namespace DesalEra.Unity.Ui
             UiFactory.Stretch(veil.rectTransform);
             veil.raycastTarget = true;
 
-            Image panel = UiFactory.Sprite(transform, UiSprites.Panel(), UiTheme.Panel);
+            Image panel = UiFactory.ThemedPanel(transform, out _);
             UiFactory.Anchor(panel.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                             Vector2.zero, new Vector2(560f, 520f));
-
-            Image border = UiFactory.Sprite(panel.transform, UiSprites.Outline(), UiTheme.Hairline);
-            UiFactory.Stretch(border.rectTransform);
-            border.raycastTarget = false;
+                             Vector2.zero, new Vector2(540f, 500f));
 
             var content = UiFactory.Container(panel.transform, "Content");
             UiFactory.Stretch(content);
             content.offsetMin = new Vector2(UiTheme.PanelPadding, UiTheme.PanelPadding);
             content.offsetMax = new Vector2(-UiTheme.PanelPadding, -UiTheme.PanelPadding);
 
-            Text heading = UiFactory.Text(content, "背包", UiTheme.FontTitle, UiTheme.TextPrimary);
+            UiLayoutSettings L = UiLayout.Active;
+            Text heading = UiFactory.Text(content, "背包", L.otherTitle, UiTheme.TextPrimary);
             var headingLayout = content.gameObject.AddComponent<VerticalLayoutGroup>();
             headingLayout.spacing = 10f;
 
@@ -75,11 +72,11 @@ namespace DesalEra.Unity.Ui
 
             BuildRows(content);
 
-            _shortfall = UiFactory.Text(content, string.Empty, UiTheme.FontBody, UiTheme.Warn);
+            _shortfall = UiFactory.Text(content, string.Empty, L.otherBody, UiTheme.Warn);
             var shortfallLayout = _shortfall.gameObject.AddComponent<LayoutElement>();
             shortfallLayout.preferredHeight = 46f;
 
-            Text footer = UiFactory.Text(content, "TAB / ESC 关闭", UiTheme.FontSmall, UiTheme.TextMuted);
+            Text footer = UiFactory.Text(content, "TAB / ESC 关闭", L.otherSmall, UiTheme.TextMuted);
             var footerLayout = footer.gameObject.AddComponent<LayoutElement>();
             footerLayout.preferredHeight = 22f;
         }
@@ -125,8 +122,10 @@ namespace DesalEra.Unity.Ui
                 textLayout.preferredWidth = 430f;
                 textLayout.preferredHeight = 48f;
 
-                Text name = UiFactory.Text(textCell, UiCopy.Resource(kind), UiTheme.FontBody, UiTheme.TextPrimary,
-                                           TextAnchor.UpperLeft);
+                UiLayoutSettings styles = UiLayout.Active;
+                var nameStyle = styles.otherBody;
+                nameStyle.alignment = TextAnchor.UpperLeft;
+                Text name = UiFactory.Text(textCell, UiCopy.Resource(kind), nameStyle, UiTheme.TextPrimary);
                 name.rectTransform.anchorMin = new Vector2(0f, 1f);
                 name.rectTransform.anchorMax = new Vector2(1f, 1f);
                 name.rectTransform.pivot = new Vector2(0f, 1f);
@@ -134,7 +133,11 @@ namespace DesalEra.Unity.Ui
                 name.rectTransform.anchoredPosition = new Vector2(0f, 0f);
                 name.horizontalOverflow = HorizontalWrapMode.Overflow;
 
-                row.Count = UiFactory.Text(textCell, "0", UiTheme.FontHeading, UiTheme.TextPrimary, TextAnchor.UpperRight);
+                var countStyle = styles.otherBody;
+                countStyle.size = Mathf.Max(countStyle.size, 28);
+                countStyle.alignment = TextAnchor.UpperRight;
+                countStyle.bold = true;
+                row.Count = UiFactory.Text(textCell, "0", countStyle, UiTheme.TextPrimary);
                 row.Count.rectTransform.anchorMin = new Vector2(1f, 1f);
                 row.Count.rectTransform.anchorMax = new Vector2(1f, 1f);
                 row.Count.rectTransform.pivot = new Vector2(1f, 1f);
@@ -142,7 +145,9 @@ namespace DesalEra.Unity.Ui
                 row.Count.rectTransform.anchoredPosition = Vector2.zero;
                 row.Count.horizontalOverflow = HorizontalWrapMode.Overflow;
 
-                row.Note = UiFactory.Text(textCell, NoteFor(kind), UiTheme.FontSmall, UiTheme.TextMuted, TextAnchor.LowerLeft);
+                var noteStyle = styles.otherSmall;
+                noteStyle.alignment = TextAnchor.LowerLeft;
+                row.Note = UiFactory.Text(textCell, NoteFor(kind), noteStyle, UiTheme.TextMuted);
                 row.Note.rectTransform.anchorMin = new Vector2(0f, 0f);
                 row.Note.rectTransform.anchorMax = new Vector2(1f, 0f);
                 row.Note.rectTransform.pivot = new Vector2(0f, 0f);

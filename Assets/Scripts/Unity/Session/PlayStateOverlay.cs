@@ -13,7 +13,9 @@ namespace DesalEra.Unity.Session
     {
         [SerializeField] private float refreshInterval = 0.1f;
         [SerializeField] private KeyCode toggleKey = KeyCode.F3;
-        [SerializeField] private bool visible = true;
+        // Off by default: a live agent can still press F3. Leaving it on wrecks immersion
+        // and photographs of the HUD.
+        [SerializeField] private bool visible = false;
         private readonly StringBuilder _text = new StringBuilder(512);
         private float _nextRefresh;
         private GUIStyle _style;

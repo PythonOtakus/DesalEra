@@ -25,15 +25,17 @@ namespace DesalEra.Unity.Ui
         }
 
         /// <summary>A rounded panel that stretches to any size without distorting.</summary>
-        public static Sprite Panel(int radius = UiTheme.CornerRadius)
+        public static Sprite Panel(int radius = -1)
         {
+            if (radius < 0) radius = UiTheme.CornerRadius;
             int size = Mathf.Max(8, radius * 2 + 6);
             return Get($"panel{radius}", size, size, s => s.PanelField(radius, 0f));
         }
 
         /// <summary>A rounded outline, for borders and focus rings.</summary>
-        public static Sprite Outline(int radius = UiTheme.CornerRadius, int thickness = 2)
+        public static Sprite Outline(int radius = -1, int thickness = 2)
         {
+            if (radius < 0) radius = UiTheme.CornerRadius;
             int size = Mathf.Max(8, radius * 2 + 6);
             return Get($"outline{radius}_{thickness}", size, size, s => s.PanelField(radius, thickness));
         }
@@ -74,7 +76,244 @@ namespace DesalEra.Unity.Ui
             });
         }
 
+        /// <summary>
+        /// Dark weathered plank face with grain. Nine-sliced; tint with <see cref="UiTheme.Panel"/>.
+        /// </summary>
+        public static Sprite WoodPanel(int radius = -1)
+        {
+            if (radius < 0) radius = UiTheme.CornerRadius;
+            int size = 48;
+            return Get($"wood{radius}", size, size, s =>
+            {
+                Color light = new Color(0.42f, 0.30f, 0.18f, 1f);
+                Color dark = new Color(0.18f, 0.12f, 0.07f, 1f);
+                for (int y = 0; y < size; y++)
+                {
+                    float fade = Mathf.Lerp(0.95f, 0.70f, y / (float)(size - 1)); // top denser
+                    bool seam = (y % 9) == 0;
+                    for (int x = 0; x < size; x++)
+                    {
+                        float wave = 0.5f + 0.5f * Mathf.Sin(y * 0.7f + x * 0.05f)
+                                   + 0.15f * Mathf.Sin(x * 1.4f);
+                        Color wood = Color.Lerp(dark, light, Mathf.Clamp01(wave));
+                        if (seam) wood *= 0.55f;
+                        float a = SoftRoundAlpha(x, y, size, radius) * fade;
+                        s.Set(x, y, a, wood);
+                    }
+                }
+            });
+        }
+
+        /// <summary>Weathered metal rim for themed panels.</summary>
+        public static Sprite MetalRim(int radius = -1, int thickness = 3)
+        {
+            if (radius < 0) radius = UiTheme.CornerRadius;
+            int size = 48;
+            return Get($"metalrim{radius}_{thickness}", size, size, s =>
+            {
+                Color metal = new Color(0.85f, 0.82f, 0.74f, 1f);
+                for (int y = 0; y < size; y++)
+                {
+                    for (int x = 0; x < size; x++)
+                    {
+                        float outer = SoftRoundAlpha(x, y, size, radius);
+                        float inner = SoftRoundAlpha(x, y, size, radius, thickness);
+                        float a = Mathf.Clamp01(outer - inner);
+                        // Scuff highlights along the rim.
+                        float scuff = 0.75f + 0.25f * Mathf.Sin(x * 0.7f + y * 0.3f);
+                        s.Set(x, y, a * scuff, metal);
+                    }
+                }
+            });
+        }
+
+        /// <summary>Rounded well for vital tracks.</summary>
+        public static Sprite BarWell(int height = 12)
+        {
+            int w = 32, h = Mathf.Max(8, height);
+            return Get($"barwell{h}", w, h, s =>
+            {
+                float r = h * 0.5f - 0.5f;
+                for (int y = 0; y < h; y++)
+                for (int x = 0; x < w; x++)
+                {
+                    float dx = x < r ? r - x : (x > w - 1 - r ? x - (w - 1 - r) : 0f);
+                    float dy = y - (h * 0.5f - 0.5f);
+                    float d = Mathf.Sqrt(dx * dx + dy * dy) - r;
+                    s.Set(x, y, 1f - d);
+                }
+            });
+        }
+
+        public static Sprite VitalIcon(DesalEra.Game.Vital vital, int size = 24)
+        {
+            return Get($"vital_{vital}_{size}", size, size, s =>
+            {
+                Color c = Color.white;
+                switch (vital)
+                {
+                    case DesalEra.Game.Vital.Food: Bread(s, size, c); break;
+                    case DesalEra.Game.Vital.Water: Droplet(s, size, c); break;
+                    case DesalEra.Game.Vital.Health: Heart(s, size, c); break;
+                    default: Bolt(s, size, c); break;
+                }
+            });
+        }
+
+        /// <summary>Distinct silhouette per build piece — shape first, tint second.</summary>
+        public static Sprite PieceIcon(string pieceName, int size = 48)
+        {
+            string key = pieceName ?? "Deck";
+            return Get($"piece_{key}_{size}", size, size, s =>
+            {
+                Color wood = new Color(0.82f, 0.66f, 0.40f);
+                Color steel = new Color(0.62f, 0.68f, 0.74f);
+                Color plastic = new Color(0.45f, 0.55f, 0.58f);
+                switch (key)
+                {
+                    case "Column":
+                        s.Box(size * 0.38f, size * 0.12f, size * 0.24f, size * 0.76f, wood);
+                        s.Box(size * 0.30f, size * 0.12f, size * 0.40f, size * 0.08f, wood * 0.8f);
+                        break;
+                    case "Pontoon":
+                        s.Box(size * 0.12f, size * 0.32f, size * 0.76f, size * 0.36f, plastic);
+                        s.Disc(size * 0.18f, size * 0.50f, size * 0.14f, plastic);
+                        s.Disc(size * 0.82f, size * 0.50f, size * 0.14f, plastic);
+                        break;
+                    case "Brace":
+                        for (int i = 0; i < size; i++)
+                        {
+                            s.Set(i, i, 1f, wood);
+                            s.Set(i, size - 1 - i, 1f, wood * 0.85f);
+                            if (i + 1 < size) { s.Set(i + 1, i, 1f, wood); s.Set(i, size - 2 - i, 1f, wood * 0.85f); }
+                        }
+                        break;
+                    case "Still":
+                        s.Box(size * 0.22f, size * 0.28f, size * 0.56f, size * 0.48f, steel);
+                        s.Box(size * 0.40f, size * 0.12f, size * 0.20f, size * 0.18f, steel * 0.8f);
+                        s.Box(size * 0.62f, size * 0.40f, size * 0.22f, size * 0.08f, steel * 0.7f);
+                        break;
+                    case "Roof":
+                        for (int y = 0; y < size / 2; y++)
+                        {
+                            float half = (y / (float)(size / 2)) * size * 0.42f;
+                            s.Box(size * 0.5f - half, size * 0.18f + y, half * 2f, 1f, wood);
+                        }
+                        s.Box(size * 0.18f, size * 0.50f, size * 0.64f, size * 0.28f, wood * 0.75f);
+                        break;
+                    case "Wall":
+                        s.Box(size * 0.18f, size * 0.14f, size * 0.64f, size * 0.72f, wood);
+                        s.Box(size * 0.18f, size * 0.32f, size * 0.64f, size * 0.04f, wood * 0.5f);
+                        s.Box(size * 0.18f, size * 0.52f, size * 0.64f, size * 0.04f, wood * 0.5f);
+                        s.Box(size * 0.46f, size * 0.14f, size * 0.06f, size * 0.72f, wood * 0.55f);
+                        break;
+                    case "Stairs":
+                        s.Box(size * 0.16f, size * 0.66f, size * 0.28f, size * 0.16f, wood);
+                        s.Box(size * 0.30f, size * 0.48f, size * 0.28f, size * 0.16f, wood * 0.92f);
+                        s.Box(size * 0.44f, size * 0.30f, size * 0.28f, size * 0.16f, wood * 0.84f);
+                        s.Box(size * 0.58f, size * 0.12f, size * 0.28f, size * 0.16f, wood * 0.76f);
+                        break;
+                    default: // Deck
+                        s.Box(size * 0.10f, size * 0.28f, size * 0.80f, size * 0.44f, wood);
+                        s.Box(size * 0.10f, size * 0.38f, size * 0.80f, size * 0.03f, wood * 0.5f);
+                        s.Box(size * 0.10f, size * 0.50f, size * 0.80f, size * 0.03f, wood * 0.5f);
+                        s.Box(size * 0.10f, size * 0.62f, size * 0.80f, size * 0.03f, wood * 0.5f);
+                        break;
+                }
+            });
+        }
+
+        public static Sprite WarnMark(int size = 20)
+        {
+            return Get($"warn{size}", size, size, s =>
+            {
+                Color c = new Color(1f, 0.85f, 0.2f);
+                // Upward triangle + bang.
+                for (int y = 2; y < size - 2; y++)
+                {
+                    float t = (y - 2) / (float)(size - 4);
+                    float half = t * (size * 0.42f);
+                    s.Box(size * 0.5f - half, y, half * 2f, 1f, c);
+                }
+                s.Box(size * 0.46f, size * 0.28f, size * 0.08f, size * 0.32f, Color.black);
+                s.Disc(size * 0.5f, size * 0.72f, size * 0.06f, Color.black);
+            });
+        }
+
+        public static Sprite Crosshair(int size = 28)
+        {
+            return Get($"cross{size}", size, size, s =>
+            {
+                int m = size / 2;
+                int gap = 3, arm = 5, thick = 2;
+                for (int i = gap; i < gap + arm; i++)
+                {
+                    for (int t = 0; t < thick; t++)
+                    {
+                        s.Set(m - i, m + t - thick / 2, 1f);
+                        s.Set(m + i, m + t - thick / 2, 1f);
+                        s.Set(m + t - thick / 2, m - i, 1f);
+                        s.Set(m + t - thick / 2, m + i, 1f);
+                    }
+                }
+                s.Disc(m, m, 1.2f, Color.white);
+            });
+        }
+
         // --- shapes ---
+
+        private static float SoftRoundAlpha(int x, int y, int size, int radius, float inset = 0f)
+        {
+            var half = new Vector2(size * 0.5f - 0.5f, size * 0.5f - 0.5f);
+            float r = Mathf.Min(radius, Mathf.Min(half.x, half.y)) - inset;
+            if (r < 1f) r = 1f;
+            var pad = new Vector2(half.x - r, half.y - r);
+            var p = new Vector2(x, y) - half;
+            var q = new Vector2(Mathf.Abs(p.x), Mathf.Abs(p.y)) - pad;
+            float d = new Vector2(Mathf.Max(q.x, 0f), Mathf.Max(q.y, 0f)).magnitude
+                    + Mathf.Min(Mathf.Max(q.x, q.y), 0f) - r;
+            return Mathf.Clamp01(1f - d);
+        }
+
+        private static void Bread(Surface s, int n, Color tint)
+        {
+            s.Disc(n * 0.5f, n * 0.52f, n * 0.32f, tint);
+            s.Box(n * 0.22f, n * 0.48f, n * 0.56f, n * 0.28f, tint);
+            s.Box(n * 0.30f, n * 0.38f, n * 0.08f, n * 0.04f, tint * 0.5f);
+            s.Box(n * 0.46f, n * 0.34f, n * 0.08f, n * 0.04f, tint * 0.5f);
+            s.Box(n * 0.62f, n * 0.38f, n * 0.08f, n * 0.04f, tint * 0.5f);
+        }
+
+        private static void Droplet(Surface s, int n, Color tint)
+        {
+            s.Disc(n * 0.5f, n * 0.58f, n * 0.26f, tint);
+            for (int y = 0; y < n / 2; y++)
+            {
+                float half = (y / (float)(n / 2)) * n * 0.22f;
+                s.Box(n * 0.5f - half, n * 0.12f + y, half * 2f, 1f, tint);
+            }
+        }
+
+        private static void Heart(Surface s, int n, Color tint)
+        {
+            s.Disc(n * 0.35f, n * 0.38f, n * 0.18f, tint);
+            s.Disc(n * 0.65f, n * 0.38f, n * 0.18f, tint);
+            for (int y = 0; y < n / 2; y++)
+            {
+                float t = y / (float)(n / 2);
+                float half = Mathf.Lerp(n * 0.38f, 0f, t);
+                s.Box(n * 0.5f - half, n * 0.42f + y, half * 2f, 1f, tint);
+            }
+        }
+
+        private static void Bolt(Surface s, int n, Color tint)
+        {
+            // Zigzag lightning.
+            s.Box(n * 0.48f, n * 0.10f, n * 0.18f, n * 0.28f, tint);
+            s.Box(n * 0.28f, n * 0.34f, n * 0.38f, n * 0.12f, tint);
+            s.Box(n * 0.38f, n * 0.42f, n * 0.18f, n * 0.38f, tint);
+            s.Box(n * 0.28f, n * 0.72f, n * 0.28f, n * 0.12f, tint);
+        }
 
         private static void ThreeChunks(Surface s, int n, Color tint)
         {
