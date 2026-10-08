@@ -48,10 +48,9 @@ namespace DesalEra.Unity
         [SerializeField] private float runCycleMeters = 2.0f;
 
         /// <summary>
-        /// Clips baked for states the gameplay does not reach yet. Swimming needs the
-        /// player to be able to leave the deck, and the ladder and rope clips need
-        /// structures to climb and hang from. They are wired up so enabling either is a
-        /// gameplay change rather than an animation change.
+        /// Clips outside the speed bands, started by name from gameplay: swimming, the
+        /// jump off the deck edge and the ladder climb back aboard. The rope clips still
+        /// wait for something to hang from.
         /// </summary>
         private static readonly string[] SpareStates =
         {
@@ -237,13 +236,34 @@ namespace DesalEra.Unity
         /// cannot express. Unknown names are ignored rather than throwing, because this is
         /// called from movement code that must not be able to break the frame.
         /// </summary>
-        public bool Play(string state, bool instant = false)
+        public bool Play(string state, bool instant = false, float startTime = 0f)
         {
             if (!_graphBuilt) return false;
-            if (!_inputByState.ContainsKey(state)) return false;
+            if (!_inputByState.TryGetValue(state, out int input)) return false;
 
             Select(state, instant);
+            if (startTime > 0f && _playableByInput.TryGetValue(input, out var playable))
+                playable.SetTime(startTime);
             return true;
+        }
+
+        /// <summary>
+        /// Poses the skeleton now from the current weights, without advancing time. For a
+        /// state change made after this frame's animation pass, where the root moves to
+        /// match the new clip: without it the frame renders the old pose at the new root.
+        /// </summary>
+        public void EvaluateNow()
+        {
+            if (_graphBuilt) _graph.Evaluate(0f);
+        }
+
+        /// <summary>Length of a state's clip in seconds at playback speed 1, or 0 if it is missing.</summary>
+        public float LengthOf(string state)
+        {
+            if (!_graphBuilt || !_inputByState.TryGetValue(state, out int input)) return 0f;
+            if (!_playableByInput.TryGetValue(input, out var playable)) return 0f;
+            var clip = playable.GetAnimationClip();
+            return clip != null ? clip.length : 0f;
         }
 
         /// <summary>

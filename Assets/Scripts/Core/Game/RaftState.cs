@@ -1196,6 +1196,39 @@ namespace DesalEra.Game
         }
 
         /// <summary>
+        /// The closest point on the deck outline to a position, and the horizontal
+        /// direction from there onto the deck. Where a survivor in the water climbs out.
+        /// Returns false when there is no deck.
+        /// </summary>
+        public bool NearestDeckEdge(Vector3 position, out Vector3 edge, out Vector3 inward)
+        {
+            edge = position;
+            inward = Vector3.zero;
+
+            List<Vector2> hull = DeckFootprint();
+            if (hull.Count < 3) return false;
+
+            var point = new Vector2(position.x, position.z);
+            float best = float.MaxValue;
+            for (int i = 0; i < hull.Count; i++)
+            {
+                Vector2 a = hull[i];
+                Vector2 side = hull[(i + 1) % hull.Count] - a;
+                float t = Mathf.Clamp01(Vector2.Dot(point - a, side) / side.sqrMagnitude);
+                Vector2 closest = a + side * t;
+                float distanceSq = (point - closest).sqrMagnitude;
+                if (distanceSq >= best) continue;
+
+                best = distanceSq;
+                // The hull winds counter-clockwise, so the left normal points inside.
+                Vector2 normal = new Vector2(-side.y, side.x).normalized;
+                edge = new Vector3(closest.x, position.y, closest.y);
+                inward = new Vector3(normal.x, 0f, normal.y);
+            }
+            return true;
+        }
+
+        /// <summary>
         /// The deck's outline in the XZ plane, as a convex hull over deck-level joints.
         ///
         /// Columns, pontoons and braces do not contribute: their joints are not at deck

@@ -41,6 +41,11 @@ Error: timed out sending command to Unity: cannot reach Unity health endpoint
 
 本项目用的是第一种，因为它不需要 GUI 操作。
 
+**前台锁的坑**：Windows 不允许"最近没有用户输入"的进程抢前台，此时 `SetForegroundWindow`
+会静默失败，只让任务栏闪烁，Unity 依旧被限流。解法是先用 `keybd_event` 模拟按放一次 Alt
+（`0x12`，按下后 flags=2 抬起），再调用 `SetForegroundWindow`，之后用 `GetForegroundWindow()`
+核对是否真的到了前台。下面的脚本已包含这一步。
+
 ### 2. 进/出 Play 模式会触发域重载
 
 此刻 HTTP listener 会短暂消失，`exec` 会报 `no Unity instances running`。等 10-20 秒后恢复。
@@ -89,10 +94,15 @@ public class U {
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
   [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
 }
 "@
 $h = (Get-Process -Id $p.Id).MainWindowHandle
-[U]::ShowWindow($h,9)|Out-Null; [U]::BringWindowToTop($h)|Out-Null; [U]::SetForegroundWindow($h)|Out-Null
+[U]::ShowWindow($h,9)|Out-Null
+[U]::keybd_event(0x12,0,0,[UIntPtr]::Zero); [U]::keybd_event(0x12,0,2,[UIntPtr]::Zero)
+[U]::BringWindowToTop($h)|Out-Null; [U]::SetForegroundWindow($h)|Out-Null
+[U]::GetForegroundWindow() -eq $h   # 应为 True
 
 # 2. 确认连接
 & $cli status

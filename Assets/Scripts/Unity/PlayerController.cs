@@ -71,9 +71,14 @@ namespace DesalEra.Unity
         private const float DefaultRootAboveSole = 0.05f;
 
         // How far past the deck outline the survivor counts as aboard: once aboard, and
-        // to climb back on from the water.
-        private const float StayAboardMarginM = 0.6f;
+        // to climb back on from the water. Leaving now plays a jump and boarding a climb
+        // that needs the stick pushed at the deck, so the swaying edge can no longer flip
+        // the survivor in and out and the stay margin only has to cover the beam's width.
+        private const float StayAboardMarginM = 0.2f;
         private const float BoardMarginM = 0.3f;
+
+        // How hard the stick must point at the deck to start climbing (cosine).
+        private const float ClimbIntentDot = 0.3f;
 
         // Half of MeshFactory Plank depth (thickness * 0.38). Joints sit on the plank
         // centreline; soles rest on the top face.
@@ -99,6 +104,33 @@ namespace DesalEra.Unity
         // turn cannot push the survivor sideways — and releasing the stick must not keep
         // applying stroke displacement along a lagging facing vector.
         private Vector3 _swimHeading = Vector3.forward;
+
+        // This frame's movement wish, world space, zero without input.
+        private Vector3 _wish;
+
+        private enum EdgeMove { None, DropIn, ClimbOut }
+
+        // Jumping off or climbing aboard. Input is ignored and the root follows a scripted
+        // path for the hips, so cross-fades between clips that hold the body at different
+        // heights do not show as the survivor popping up or down.
+        private EdgeMove _edgeMove;
+        private float _edgeTime;
+
+        private Vector3 _dropHips;
+        private Vector3 _dropVelocity;
+        private float _dropSeconds;
+
+        private Vector3 _climbEdge;
+        private Vector3 _climbInward;
+        private Vector3 _climbStartRoot;
+        private float _climbStartHipsY;
+        private bool _climbFinishing;
+
+        // Sinking from the splash to swimming depth, carrying the fall's speed into the
+        // water rather than stopping dead at the surface. Time is negative when not settling.
+        private float _settleTime = -1f;
+        private float _settleY;
+        private float _settleSpeed;
 
 private static readonly BuildPiece[] Palette =
         {
@@ -137,6 +169,9 @@ private static readonly BuildPiece[] Palette =
         public LocomotionMode Mode => _mode;
 
         public bool IsInWater => _mode == LocomotionMode.InWater;
+
+        /// <summary>"DropIn" or "ClimbOut" while jumping off or climbing aboard, otherwise null.</summary>
+        public string EdgeMoveName => _edgeMove == EdgeMove.None ? null : _edgeMove.ToString();
 
         /// <summary>The visible character, if one loaded.</summary>
         public PlayerAvatar Avatar { get; set; }
@@ -191,7 +226,16 @@ private void Update()
         {
             if (_world == null) return;
 
-            HandleMovement();
+            if (_settleTime >= 0f)
+            {
+                _settleTime += Time.deltaTime;
+                float swim = SwimHeight();
+                _settleY = Mathf.SmoothDamp(_settleY, swim, ref _settleSpeed, EdgeTransition.SplashSettleSeconds * 0.4f);
+                bool still = Mathf.Abs(_settleY - swim) < 0.02f && Mathf.Abs(_settleSpeed) < 0.1f;
+                if (still || _settleTime >= 3f * EdgeTransition.SplashSettleSeconds) _settleTime = -1f;
+            }
+
+            if (_edgeMove == EdgeMove.None) HandleMovement();
             HandleBuildInput();
             ApplyWorkCost();
 
@@ -199,7 +243,7 @@ private void Update()
             // stop existing under a survivor who is standing still: dismantling the piece
             // they are on leaves them floating, and a check that only ran while walking
             // would leave them on deck forever.
-            UpdateMode(RaftLocal(transform.position));
+            if (_edgeMove == EdgeMove.None) UpdateMode(RaftLocal(transform.position));
 
             Vector3 feet = RaftLocal(transform.position);
             feet.y = _surfaceLocalY;
@@ -235,6 +279,15 @@ private void Update()
             // RaftMotion writes heave and tilt in LateUpdate. Re-plant after that so the
             // soles cannot lag a frame above the moving deck.
             if (_world == null || Avatar == null) return;
+
+            if (_edgeMove != EdgeMove.None)
+            {
+                _edgeTime += Time.deltaTime;
+                if (_edgeMove == EdgeMove.DropIn) StepDrop();
+                else StepClimb();
+                return;
+            }
+
             Vector3 p = transform.position;
 
             // On deck the survivor rides the raft: tilting swings every deck point
@@ -323,12 +376,14 @@ private void Update()
         /// </summary>
         public string TeleportTo(Vector3 world)
         {
+            _edgeMove = EdgeMove.None;
+            _settleTime = -1f;
             transform.position = world;
             float heave = _world != null && _world.RaftMotion != null ? _world.RaftMotion.HeaveY : 0f;
             float hint = Mathf.Max(DeckSurfaceLocalY, world.y - heave);
-            UpdateMode(RaftLocal(transform.position));
+            UpdateMode(RaftLocal(transform.position), snap: true);
             _surfaceLocalY = hint;
-            UpdateMode(RaftLocal(transform.position));
+            UpdateMode(RaftLocal(transform.position), snap: true);
             Vector3 p = transform.position;
             p.y = SurfaceHeight();
             transform.position = p;
@@ -358,6 +413,7 @@ private void HandleMovement()
             Vector3 wish = (forward * v + right * h);
             bool hasInput = wish.sqrMagnitude > 0.0001f;
             if (hasInput) wish.Normalize();
+            _wish = hasInput ? wish : Vector3.zero;
 
             if (_mode == LocomotionMode.InWater)
             {
@@ -473,11 +529,7 @@ private void HandleMovement()
             float sole = Avatar != null ? Avatar.RootAboveSoleM : DefaultRootAboveSole;
 
             if (_mode == LocomotionMode.InWater)
-            {
-                float stroke = Animator != null ? Animator.WeightOf("SwimForward") : 0f;
-                return SeaWave.HeightAt(transform.position)
-                     - Mathf.Lerp(SwimIdleRootBelowSurface, SwimStrokeRootBelowSurface, stroke);
-            }
+                return _settleTime >= 0f ? _settleY : SwimHeight();
 
             // Ride the moving deck plane so feet stay planted while the raft heaves.
             // DeckPlankHalfDepthM lifts soles from the joint centreline onto the plank top.
@@ -488,6 +540,13 @@ private void HandleMovement()
             }
 
             return _surfaceLocalY + sole;
+        }
+
+        private float SwimHeight()
+        {
+            float stroke = Animator != null ? Animator.WeightOf("SwimForward") : 0f;
+            return SeaWave.HeightAt(transform.position)
+                 - Mathf.Lerp(SwimIdleRootBelowSurface, SwimStrokeRootBelowSurface, stroke);
         }
 
         /// <summary>Raft-local height of the deck's walking surface: the top of the beams.</summary>
@@ -525,9 +584,11 @@ private void HandleMovement()
         /// the raft can stand on.
         ///
         /// This only decides the mode; the height each mode implies is applied by the
-        /// movement code, so the two cannot disagree about where the survivor is.
+        /// movement code, so the two cannot disagree about where the survivor is. Walking
+        /// off the edge starts a jump into the water and swimming into the edge a climb
+        /// aboard; <paramref name="snap"/> skips both, for teleports.
         /// </summary>
-        private void UpdateMode(Vector3 position)
+        private void UpdateMode(Vector3 position, bool snap = false)
         {
             // The raft is built in GameBootstrap.Awake. Ordering between that and this
             // frame's Update is not something to depend on, and throwing here would repeat
@@ -541,16 +602,189 @@ private void HandleMovement()
             {
                 _mode = LocomotionMode.InWater;
                 StatusLine = "In the water. Swim out to salvage, step back onto the deck to build.";
-                // Snap — cross-fading Run into Swim reads as "still running on the water".
-                if (Animator != null) Animator.Play("SwimIdle", instant: true);
+                if (snap || !BeginDrop(position))
+                {
+                    // Snap — cross-fading Run into Swim reads as "still running on the water".
+                    if (Animator != null) Animator.Play("SwimIdle", instant: true);
+                }
             }
             else if (_mode == LocomotionMode.InWater && overDeck)
             {
+                if (!snap && CanAnimateEdge)
+                {
+                    BeginClimb(position);
+                    return;
+                }
                 _mode = LocomotionMode.OnDeck;
                 StatusLine = "Back on deck.";
                 if (Avatar != null) Avatar.AnchorChestToRoot = false;
                 if (Animator != null) Animator.Play("Idle", instant: true);
             }
+        }
+
+        private bool CanAnimateEdge =>
+            Avatar != null && Avatar.Hips != null && Animator != null && Animator.HasClips && RaftFrame != null;
+
+        /// <summary>
+        /// Steps off the deck into the second half of the standing jump: from just before
+        /// the peak, with the fall timed so the feet come down as they reach the water.
+        /// </summary>
+        private bool BeginDrop(Vector3 raftLocal)
+        {
+            if (!CanAnimateEdge || !Animator.Play("Jump", startTime: EdgeTransition.JumpFallStart)) return false;
+
+            Transform frame = RaftFrame;
+            Vector3 outward = new Vector3(_velocity.x, 0f, _velocity.z);
+            if (outward.sqrMagnitude < 0.09f && _world.Raft.NearestDeckEdge(raftLocal, out _, out Vector3 inward))
+                outward = -frame.TransformDirection(inward);
+            if (outward.sqrMagnitude < 1e-4f) outward = Avatar.FacingDirection;
+            outward.y = 0f;
+            float speed = Mathf.Max(new Vector2(_velocity.x, _velocity.z).magnitude, EdgeTransition.DropMinOutwardSpeed);
+
+            _dropHips = Avatar.Hips.position;
+            _dropVelocity = outward.normalized * speed + Vector3.up * EdgeTransition.DropHopSpeed;
+            float drop = _dropHips.y - (SeaWave.HeightAt(transform.position) + EdgeTransition.TouchdownHipsAboveFeet);
+            _dropSeconds = EdgeTransition.FallSeconds(drop, EdgeTransition.DropHopSpeed);
+            Animator.SetPlaybackSpeed(EdgeTransition.DropPlayback(_dropSeconds));
+
+            _edgeMove = EdgeMove.DropIn;
+            _edgeTime = 0f;
+            Avatar.AnchorChestToRoot = false;
+            _swimHeading = outward.normalized;
+            return true;
+        }
+
+        private void StepDrop()
+        {
+            float t = _edgeTime;
+            Vector3 hips = _dropHips + _dropVelocity * t + 0.5f * EdgeTransition.Gravity * t * t * Vector3.down;
+            transform.position += hips - Avatar.Hips.position;
+
+            // The swell moves a metre in the time it takes to fall, so the splash is
+            // tested against the water under the survivor now, not where it was at take-off.
+            float splash = SeaWave.HeightAt(transform.position) + EdgeTransition.TouchdownHipsAboveFeet;
+            if (hips.y > splash && t < 2f * _dropSeconds) return;
+
+            _edgeMove = EdgeMove.None;
+            _velocity = Vector3.zero;
+            Avatar.AnchorChestToRoot = true;
+            Animator.Play("SwimIdle");
+            _settleY = transform.position.y;
+            _settleSpeed = _dropVelocity.y - EdgeTransition.Gravity * t;
+            _settleTime = 0f;
+        }
+
+        /// <summary>
+        /// Climbs aboard at the nearest edge, if the survivor is swimming at it: one ladder
+        /// cycle lifts the body out of the water, then the finish hauls it over the edge
+        /// and stands it up on the deck.
+        /// </summary>
+        private void BeginClimb(Vector3 raftLocal)
+        {
+            if (!_world.Raft.NearestDeckEdge(raftLocal, out Vector3 edge, out Vector3 inward)) return;
+
+            Vector3 wish = RaftFrame.InverseTransformDirection(_wish);
+            wish.y = 0f;
+            bool outside = Vector3.Dot(raftLocal - edge, inward) < 0f;
+            if (outside && Vector3.Dot(wish.normalized, inward) < ClimbIntentDot) return;
+            if (!Animator.Play("LadderClimbLoop")) return;
+
+            Animator.SetPlaybackSpeed(EdgeTransition.ClimbPlayback);
+            _climbEdge = edge;
+            _climbInward = inward;
+            _climbStartRoot = transform.position;
+            _climbStartHipsY = Avatar.Hips.position.y;
+            _climbFinishing = false;
+            _settleTime = -1f;
+            _edgeMove = EdgeMove.ClimbOut;
+            _edgeTime = 0f;
+            _velocity = Vector3.zero;
+            StatusLine = "Climbing aboard.";
+        }
+
+        private void StepClimb()
+        {
+            Transform frame = RaftFrame;
+            float sole = Avatar.RootAboveSoleM;
+
+            // Where the clip origin hangs while the finish plays: just off the edge, low
+            // enough that the finish ends standing on the deck.
+            Vector3 grip = _climbEdge - _climbInward * EdgeTransition.ClimbEdgeOffset;
+            grip.y = DeckSurfaceLocalY;
+            Vector3 hang = frame.TransformPoint(grip) + Vector3.up * (sole - EdgeTransition.ClimbFinishRise);
+
+            Vector3 inward = frame.TransformDirection(_climbInward);
+            Avatar.FaceTowards(inward, 540f);
+
+            float hipsAboveRoot = Avatar.Hips.position.y - transform.position.y;
+            float loopSeconds = EdgeTransition.ClimbLoopHandover / EdgeTransition.ClimbPlayback;
+
+            float hands = _climbFinishing
+                ? EdgeTransition.HandsOnDeck((_edgeTime - loopSeconds) * EdgeTransition.ClimbPlayback, true)
+                : EdgeTransition.HandsOnDeck(_edgeTime * EdgeTransition.ClimbPlayback, false);
+            Vector3 plant = frame.TransformPoint(HandPlant());
+            Vector3 side = frame.TransformDirection(Vector3.Cross(Vector3.up, _climbInward)) * EdgeTransition.HandSpread;
+            if (hands > 0f) Avatar.ReachHands(plant - side, plant + side, hands);
+
+            if (!_climbFinishing)
+            {
+                Vector3 p = Vector3.Lerp(_climbStartRoot, hang, EdgeTransition.Smooth(_edgeTime / 0.5f));
+                float hipsY = Mathf.Lerp(_climbStartHipsY, hang.y + EdgeTransition.ClimbFinishGripHips,
+                    EdgeTransition.Smooth(_edgeTime / loopSeconds));
+                p.y = hipsY - hipsAboveRoot;
+                transform.position = p + ReachOffset(p, plant, inward) * hands;
+
+                if (_edgeTime < loopSeconds) return;
+                _climbFinishing = true;
+                Avatar.AnchorChestToRoot = false;
+                Animator.Play("LadderClimbFinish");
+                Animator.SetPlaybackSpeed(EdgeTransition.ClimbPlayback);
+                return;
+            }
+
+            // Hold the hips while the finish fades in, then hand the root to the clip.
+            float held = hang.y + EdgeTransition.ClimbFinishGripHips - hipsAboveRoot;
+            Vector3 q = hang;
+            q.y = Mathf.Lerp(held, hang.y, Animator.WeightOf("LadderClimbFinish"));
+            transform.position = q + ReachOffset(q, plant, inward) * hands;
+
+            float finishSeconds = Animator.LengthOf("LadderClimbFinish") / EdgeTransition.ClimbPlayback;
+            if (_edgeTime < loopSeconds + finishSeconds) return;
+
+            Vector3 stand = _climbEdge + _climbInward * (EdgeTransition.ClimbFinishReach - EdgeTransition.ClimbEdgeOffset);
+            stand.y = DeckSurfaceLocalY;
+            _edgeMove = EdgeMove.None;
+            _mode = LocomotionMode.OnDeck;
+            _surfaceLocalY = DeckSurfaceLocalY;
+            _raftLocal = stand;
+            transform.position = frame.TransformPoint(stand) + Vector3.up * sole;
+            Animator.Play("Idle", instant: true);
+            Animator.EvaluateNow();
+            StatusLine = "Back on deck.";
+        }
+
+        /// <summary>Raft-local point between the two wrists, on the planks just inside the edge.</summary>
+        private Vector3 HandPlant()
+        {
+            Vector3 plant = _climbEdge + _climbInward * EdgeTransition.HandInset;
+            plant.y = DeckSurfaceLocalY + EdgeTransition.HandAboveDeck;
+            return plant;
+        }
+
+        /// <summary>
+        /// Shift that brings the shoulders within arm's reach of <paramref name="plant"/> with
+        /// the root at <paramref name="root"/>: in toward the side of the raft first, then down.
+        /// </summary>
+        private Vector3 ReachOffset(Vector3 root, Vector3 plant, Vector3 inward)
+        {
+            Vector3 shoulders = root + (Avatar.ShouldersPosition - transform.position);
+            float reach = Avatar.ArmLengthM * 0.95f;
+            float ahead = Vector3.Dot(plant - shoulders, inward);
+            float pull = Mathf.Max(0f, ahead - reach * EdgeTransition.ReachForwardShare);
+            float across = ahead - pull;
+            float above = shoulders.y - plant.y;
+            float drop = Mathf.Max(0f, above - Mathf.Sqrt(Mathf.Max(0f, reach * reach - across * across)));
+            return inward * pull + Vector3.down * drop;
         }
 
         /// <summary>

@@ -36,6 +36,11 @@ namespace DesalEra.Unity
         private SkinnedMeshRenderer _renderer;
         private Transform _playerTransform;
         private Transform _chest;
+        private readonly Transform[] _leftArm = new Transform[3];
+        private readonly Transform[] _rightArm = new Transform[3];
+        private Vector3 _leftHandTarget;
+        private Vector3 _rightHandTarget;
+        private float _handWeight;
 
         /// <summary>
         /// When true the model is shifted horizontally so the chest stays over the
@@ -44,6 +49,18 @@ namespace DesalEra.Unity
         /// body back toward the root and read as the survivor swimming backwards.
         /// </summary>
         public bool AnchorChestToRoot { get; set; }
+
+        /// <summary>The skeleton's hips, posed by this frame's animation by LateUpdate.</summary>
+        public Transform Hips { get; private set; }
+
+        /// <summary>Shoulder to wrist with the arm straight, metres.</summary>
+        public float ArmLengthM { get; private set; }
+
+        /// <summary>Midpoint of the two shoulder joints as currently posed.</summary>
+        public Vector3 ShouldersPosition =>
+            _leftArm[0] != null && _rightArm[0] != null
+                ? (_leftArm[0].position + _rightArm[0].position) * 0.5f
+                : transform.position;
 
         /// <summary>Height in metres, measured from the loaded mesh.</summary>
         public float ModelHeightM { get; private set; }
@@ -104,8 +121,20 @@ namespace DesalEra.Unity
             _renderer = instance.GetComponentInChildren<SkinnedMeshRenderer>(true);
             foreach (Transform t in instance.GetComponentsInChildren<Transform>(true))
             {
-                if (t.name == "Spine02") { _chest = t; break; }
+                if (t.name == "Hips" && Hips == null) Hips = t;
+                if (t.name == "Spine02") _chest = t;
                 if (t.name == "Spine01" && _chest == null) _chest = t;
+                if (t.name == "LeftArm") _leftArm[0] = t;
+                if (t.name == "LeftForeArm") _leftArm[1] = t;
+                if (t.name == "LeftHand") _leftArm[2] = t;
+                if (t.name == "RightArm") _rightArm[0] = t;
+                if (t.name == "RightForeArm") _rightArm[1] = t;
+                if (t.name == "RightHand") _rightArm[2] = t;
+            }
+            if (_leftArm[0] != null && _leftArm[1] != null && _leftArm[2] != null)
+            {
+                ArmLengthM = Vector3.Distance(_leftArm[0].position, _leftArm[1].position)
+                           + Vector3.Distance(_leftArm[1].position, _leftArm[2].position);
             }
             ApplyMaterial(_renderer);
 
@@ -231,6 +260,57 @@ namespace DesalEra.Unity
             }
 
             _model.transform.localPosition = local;
+
+            if (_handWeight > 0f)
+            {
+                ReachArm(_leftArm, _leftHandTarget, _handWeight);
+                ReachArm(_rightArm, _rightHandTarget, _handWeight);
+                _handWeight = 0f;
+            }
+        }
+
+        /// <summary>
+        /// Pulls the wrists toward world points for this frame only, after the clip has
+        /// posed the arms. Call every frame it should hold; a target out of reach leaves
+        /// the arm straight and pointing at it.
+        /// </summary>
+        public void ReachHands(Vector3 leftWrist, Vector3 rightWrist, float weight)
+        {
+            _leftHandTarget = leftWrist;
+            _rightHandTarget = rightWrist;
+            _handWeight = Mathf.Clamp01(weight);
+        }
+
+        /// <summary>
+        /// Two-bone IK on shoulder, elbow and wrist. The elbow stays on the side the clip
+        /// bent it to, and the hand keeps the clip's world rotation.
+        /// </summary>
+        private static void ReachArm(Transform[] arm, Vector3 target, float weight)
+        {
+            Transform upper = arm[0], lower = arm[1], hand = arm[2];
+            if (upper == null || lower == null || hand == null) return;
+
+            Quaternion handRotation = hand.rotation;
+            Vector3 a = upper.position, b = lower.position, c = hand.position;
+            float ab = Vector3.Distance(a, b), bc = Vector3.Distance(b, c);
+            Vector3 goal = Vector3.Lerp(c, target, weight);
+
+            Vector3 toGoal = goal - a;
+            float reach = Mathf.Clamp(toGoal.magnitude, Mathf.Abs(ab - bc) + 1e-3f, ab + bc - 1e-3f);
+            Vector3 dir = toGoal.sqrMagnitude > 1e-8f ? toGoal.normalized : (c - a).normalized;
+
+            Vector3 bend = Vector3.ProjectOnPlane(b - a, dir);
+            if (bend.sqrMagnitude < 1e-8f) bend = Vector3.ProjectOnPlane(Vector3.down, dir);
+            bend.Normalize();
+
+            float along = (ab * ab - bc * bc + reach * reach) / (2f * reach);
+            float up = Mathf.Sqrt(Mathf.Max(0f, ab * ab - along * along));
+            Vector3 elbow = a + dir * along + bend * up;
+
+            upper.rotation = Quaternion.FromToRotation(b - a, elbow - a) * upper.rotation;
+            lower.rotation = Quaternion.FromToRotation(hand.position - lower.position, a + dir * reach - lower.position)
+                           * lower.rotation;
+            hand.rotation = handRotation;
         }
 
         public void FaceTowards(Vector3 worldDirection, float turnDegreesPerSecond = 0f)

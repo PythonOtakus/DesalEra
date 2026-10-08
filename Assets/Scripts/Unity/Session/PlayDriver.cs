@@ -246,7 +246,7 @@ namespace DesalEra.Unity.Session
                 snap.x = p.x;
                 snap.y = p.y;
                 snap.z = p.z;
-                snap.mode = player.Mode.ToString();
+                snap.mode = player.EdgeMoveName ?? player.Mode.ToString();
                 snap.anim = player.Animator != null ? player.Animator.CurrentState : "";
                 snap.selected = player.SelectedIndex;
                 snap.status = player.StatusLine ?? "";
