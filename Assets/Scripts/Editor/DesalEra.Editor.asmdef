@@ -4,7 +4,9 @@
   "references": [
     "DesalEra.Core",
     "DesalEra.Unity",
-    "UnityCliConnector.Editor"
+    "UnityCliConnector.Editor",
+    "UnityEditor.TestRunner",
+    "UnityEngine.TestRunner"
   ],
   "includePlatforms": [
     "Editor"

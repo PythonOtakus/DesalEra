@@ -60,11 +60,20 @@ namespace DesalEra.Unity
         [Tooltip("Survival units spent per second of continuous work, before recovery.")]
         [SerializeField] private float workCostPerSecond = 1.6f;
 
-        // How far below the local swell the player root sits while swimming. Mean water
-        // is 0 but the drawn sea rides SeaWave (~±1 m); pinning to WaterLevelY left the
-        // survivor hanging in mid-air relative to the visible surface.
-        private const float SwimRootBelowSurface = 0.85f;
+        // How far below the local swell the player root sits while swimming, measured
+        // against SeaWave rather than mean water so the survivor rides the drawn swell.
+        // The clips are authored with the waterline at different heights: treading water
+        // is upright with the head at 1.3 m, the stroke lies face down with the head at
+        // the clip origin. One depth for both either drowns the swimmer or lifts the
+        // treading body out to the waist.
+        private const float SwimIdleRootBelowSurface = 0.85f;
+        private const float SwimStrokeRootBelowSurface = 0.05f;
         private const float DefaultRootAboveSole = 0.05f;
+
+        // How far past the deck outline the survivor counts as aboard: once aboard, and
+        // to climb back on from the water.
+        private const float StayAboardMarginM = 0.6f;
+        private const float BoardMarginM = 0.3f;
 
         // Half of MeshFactory Plank depth (thickness * 0.38). Joints sit on the plank
         // centreline; soles rest on the top face.
@@ -190,21 +199,52 @@ private void Update()
             // stop existing under a survivor who is standing still: dismantling the piece
             // they are on leaves them floating, and a check that only ran while walking
             // would leave them on deck forever.
-            UpdateMode(transform.localPosition);
+            UpdateMode(RaftLocal(transform.position));
 
-            Vector3 feet = transform.localPosition;
+            Vector3 feet = RaftLocal(transform.position);
             feet.y = _surfaceLocalY;
             IsSheltered = !IsInWater && _world.Raft.IsSheltered(feet);
             UpdatePreview();
             _world.PlayerSheltered = IsSheltered;
+
+            // The raft has not moved yet this frame (RaftMotion runs in LateUpdate), so
+            // this is where the survivor stands in the frame they were last planted in.
+            _raftLocal = RaftLocal(transform.position);
+        }
+
+        // Where the survivor stands in raft coordinates, carried across the raft's
+        // LateUpdate so they ride the deck rather than staying put in the world.
+        private Vector3 _raftLocal;
+
+        private Transform RaftFrame =>
+            _world != null && _world.RaftMotion != null ? _world.RaftMotion.transform : null;
+
+        /// <summary>
+        /// Raft-local position of the survivor's footprint: where the vertical through
+        /// them meets the surface they stand on, so it does not change with their height.
+        /// RaftState works in these coordinates.
+        /// </summary>
+        private Vector3 RaftLocal(Vector3 world)
+        {
+            if (_world == null || _world.RaftMotion == null) return world;
+            return _world.RaftMotion.LocalOnPlane(world, _surfaceLocalY);
         }
 
         private void LateUpdate()
         {
-            // RaftMotion writes heave in LateUpdate. Re-plant after that so the soles
-            // cannot lag a frame above the moving deck.
+            // RaftMotion writes heave and tilt in LateUpdate. Re-plant after that so the
+            // soles cannot lag a frame above the moving deck.
             if (_world == null || Avatar == null) return;
             Vector3 p = transform.position;
+
+            // On deck the survivor rides the raft: tilting swings every deck point
+            // sideways by up to 1.5 m * sin 6°, and holding world XZ fixed against that
+            // read as sliding across the boards. In water the sea is the reference.
+            Transform frame = RaftFrame;
+            if (_mode == LocomotionMode.OnDeck && frame != null)
+                p = frame.TransformPoint(_raftLocal);
+
+            transform.position = p;
             p.y = SurfaceHeight();
             transform.position = p;
         }
@@ -286,9 +326,9 @@ private void Update()
             transform.position = world;
             float heave = _world != null && _world.RaftMotion != null ? _world.RaftMotion.HeaveY : 0f;
             float hint = Mathf.Max(DeckSurfaceLocalY, world.y - heave);
-            UpdateMode(transform.position);
+            UpdateMode(RaftLocal(transform.position));
             _surfaceLocalY = hint;
-            UpdateMode(transform.position);
+            UpdateMode(RaftLocal(transform.position));
             Vector3 p = transform.position;
             p.y = SurfaceHeight();
             transform.position = p;
@@ -384,9 +424,10 @@ private void HandleMovement()
             }
             else if (Animator != null)
             {
-                // Instant idle: a cross-fade still advanced SwimForward for a beat and
-                // read as a slide/backstep when the stick was released.
-                Animator.Play("SwimIdle", instant: true);
+                // Cross-faded: the stroke is face down and treading is upright, so a snap
+                // flips the body vertical in one frame. The slide this once caused is
+                // held off by AnchorChestToRoot and by travel stopping with the input.
+                Animator.Play("SwimIdle");
                 Animator.SetPlaybackSpeed(1f);
             }
 
@@ -432,7 +473,11 @@ private void HandleMovement()
             float sole = Avatar != null ? Avatar.RootAboveSoleM : DefaultRootAboveSole;
 
             if (_mode == LocomotionMode.InWater)
-                return SeaWave.HeightAt(transform.position) - SwimRootBelowSurface;
+            {
+                float stroke = Animator != null ? Animator.WeightOf("SwimForward") : 0f;
+                return SeaWave.HeightAt(transform.position)
+                     - Mathf.Lerp(SwimIdleRootBelowSurface, SwimStrokeRootBelowSurface, stroke);
+            }
 
             // Ride the moving deck plane so feet stay planted while the raft heaves.
             // DeckPlankHalfDepthM lifts soles from the joint centreline onto the plank top.
@@ -445,7 +490,8 @@ private void HandleMovement()
             return _surfaceLocalY + sole;
         }
 
-        private static float DeckSurfaceLocalY => RaftState.BaseDeckY + DeckPlankHalfDepthM;
+        /// <summary>Raft-local height of the deck's walking surface: the top of the beams.</summary>
+        public static float DeckSurfaceLocalY => RaftState.BaseDeckY + DeckPlankHalfDepthM;
 
         /// <summary>
         /// Raft-local height of whatever the survivor is standing on: the deck, a floor
@@ -461,7 +507,11 @@ private void HandleMovement()
         /// <summary>Picks the surface underfoot. Returns false when there is none (open water).</summary>
         private bool ResolveSurface(Vector3 position, out float surfaceY)
         {
-            bool overDeck = _world.Raft.IsOverDeck(position);
+            // Climbing out needs a firmer footing than staying aboard. With one edge the
+            // swaying raft carries that edge back and forth under a survivor standing on
+            // it, and they drop in and climb out with every swell.
+            float margin = _mode == LocomotionMode.OnDeck ? StayAboardMarginM : BoardMarginM;
+            bool overDeck = _world.Raft.IsOverDeck(position, margin);
             float reach = (_mode == LocomotionMode.OnDeck ? _surfaceLocalY : DeckSurfaceLocalY) + RaftState.StepUpM;
 
             surfaceY = overDeck ? DeckSurfaceLocalY : float.NegativeInfinity;

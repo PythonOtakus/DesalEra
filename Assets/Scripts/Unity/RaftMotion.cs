@@ -26,12 +26,32 @@ namespace DesalEra.Unity
         /// <summary>World-space point on the moving deck plane (deck-local Y = BaseDeckY).</summary>
         public Vector3 DeckPoint(Vector3 worldXZ) => SurfacePoint(worldXZ, RaftState.BaseDeckY);
 
-        /// <summary>World-space point on a raft-local horizontal plane at <paramref name="localY"/>.</summary>
-        public Vector3 SurfacePoint(Vector3 worldXZ, float localY)
+        /// <summary>
+        /// World-space point on a raft-local horizontal plane at <paramref name="localY"/>,
+        /// straight above or below <paramref name="worldXZ"/>.
+        /// </summary>
+        public Vector3 SurfacePoint(Vector3 worldXZ, float localY) =>
+            transform.TransformPoint(LocalOnPlane(worldXZ, localY));
+
+        /// <summary>
+        /// Raft-local coordinates of where the world vertical through <paramref name="world"/>
+        /// meets the raft-local plane at <paramref name="localY"/>.
+        ///
+        /// Independent of the point's own height. Converting the point itself would not be:
+        /// on a tilted raft, points above each other map to local XZ that differ by
+        /// height × sin(tilt), about 0.3 m between a survivor standing on the deck and the
+        /// same survivor dropped to the waterline. At the deck edge that difference alone
+        /// flipped them between deck and water every frame.
+        /// </summary>
+        public Vector3 LocalOnPlane(Vector3 world, float localY)
         {
-            Vector3 local = transform.InverseTransformPoint(new Vector3(worldXZ.x, 0f, worldXZ.z));
+            Vector3 normal = transform.up;
+            Vector3 origin = transform.TransformPoint(new Vector3(0f, localY, 0f));
+            float rise = Mathf.Max(normal.y, 1e-3f);
+            float t = Vector3.Dot(origin - world, normal) / rise;
+            Vector3 local = transform.InverseTransformPoint(world + Vector3.up * t);
             local.y = localY;
-            return transform.TransformPoint(local);
+            return local;
         }
 
         private void LateUpdate()

@@ -211,6 +211,39 @@ namespace DesalEra.Unity
                 GameObject visual = BuildPlacementVisual(piece, key, null);
                 if (visual != null) _raftObjects.Add(visual);
             }
+
+            GameObject floor = BuildDeckFloor();
+            if (floor != null) _raftObjects.Add(floor);
+        }
+
+        private Mesh _floorMesh;
+
+        /// <summary>
+        /// Boards over the deck footprint. The survivor can stand anywhere inside the
+        /// footprint (see <see cref="RaftState.IsOverDeck"/>), so drawing exactly that
+        /// outline keeps what looks walkable and what is walkable the same; the opening
+        /// raft is otherwise a bare frame with the survivor standing on open water.
+        /// </summary>
+        private GameObject BuildDeckFloor()
+        {
+            if (_floorMesh != null) SafeDestroy(_floorMesh);
+            _floorMesh = null;
+
+            List<Vector2> outline = Raft.DeckFootprint();
+            if (outline.Count < 3) return null;
+
+            const float thickness = 0.06f;
+            // A centimetre under the beam tops, so the boards meet the frame without
+            // z-fighting along the strip where they overlap.
+            float top = PlayerController.DeckSurfaceLocalY - 0.01f;
+
+            _floorMesh = MeshFactory.Floor(outline.ToArray(), thickness, Materials.TilingMetresFor("deck"));
+            var go = new GameObject("deck_floor");
+            go.transform.SetParent(RaftRoot, worldPositionStays: false);
+            go.transform.localPosition = new Vector3(0f, top - thickness * 0.5f, 0f);
+            go.AddComponent<MeshFilter>().sharedMesh = _floorMesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = Materials.Get("deck");
+            return go;
         }
 
         /// <summary>The raft root members and piece visuals hang from, so they ride the swell.</summary>
@@ -683,6 +716,7 @@ namespace DesalEra.Unity
             }
             _slabMeshes.Clear();
 
+            if (_floorMesh != null) SafeDestroy(_floorMesh);
             if (_waterMaterial != null) SafeDestroy(_waterMaterial);
             if (_pickupMesh != null) SafeDestroy(_pickupMesh);
         }

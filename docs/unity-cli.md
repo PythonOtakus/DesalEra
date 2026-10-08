@@ -22,7 +22,7 @@ Unity 侧插件已加进 `Packages/manifest.json`：
 "com.youngwoocho02.unity-cli-connector": "https://github.com/youngwoocho02/unity-cli.git?path=unity-connector#v0.4.1"
 ```
 
-## 三个必须知道的限制
+## 四个必须知道的限制
 
 ### 1. 窗口失焦会让编辑器停止响应
 
@@ -52,6 +52,24 @@ Error: timed out sending command to Unity: cannot reach Unity health endpoint
 Play 模式加载的是 Build Settings 的首个场景，不是"最近打开的"。用 `-executeMethod` 构建 exe 时可以手动传场景数组绕过，但编辑器里 Play 不行。
 
 本项目已把 `Main.unity` 设为唯一构建场景。
+
+### 4. 测试中途夭折会锁死整个 connector（只有域重载能解）
+
+**现象**：`status` 正常（读的是心跳文件），但 `exec` / `console` / `editor stop` / `test` 全部超时，等多久都不恢复。2026-10-08 多次"Unity 断连"都是它，不是失焦。
+
+**根因**（connector 0.4.1 的 bug）：
+
+- `CommandRouter.Dispatch` 用一个全局 `SemaphoreSlim(1,1)` 串行执行所有命令。
+- `test --mode EditMode` 的处理函数只在 `RunFinished` 回调里结束。测试框架夭折时走的是 `RunFailed`（`IErrorCallbacks.OnError`），connector 没实现，于是这条命令永远不返回，锁永远不释放。
+- 最常见的触发：**编辑器处于 Play 模式时跑 EditMode 测试**。测试框架在 `SaveModiedSceneTask` 抛 `InvalidOperationException: This cannot be used during play mode`。录完一段会话忘了停 Play，再让 agent 跑测试，就会中招。
+- 退出 Play 模式不会释放锁，要靠域重载重建静态字段。
+
+**本项目的防护**（`Assets/Scripts/Editor/Cli/TestRunGuard.cs`）：
+
+- 自动：注册 `IErrorCallbacks`，测试夭折时自动退出 Play 并 `RequestScriptReload()`。CLI 在连接断开后会重发请求，测试会在编辑模式下正常跑完。已实测：Play 中发 `test`，约 30 秒后返回 12/12 通过。
+- 手动：如果测试不报错只是卡住（例如编辑器失焦被限流），把 Unity 拉到前台后按 **Ctrl+Alt+R**（菜单 DesalEra → Reload Scripts）：先退出 Play，再重载脚本，connector 随即恢复，不必重启 Unity。
+
+**操作习惯**：跑 `test` 前先 `status`，如果是 `playing` 就先 `editor stop`。
 
 ## 标准操作流程
 
@@ -218,6 +236,13 @@ b.Reanalyse();
 结果：`placed=40 pieces=48 float=False spare=-203.7kN weight=286.9kN`
 
 **发现**：斜撑是实心钢件，加得越多木筏越重，最终沉没。玩家会自然学会"斜撑不能无脑堆"，这正是设计想要的张力。
+
+## 断连排查顺序
+
+1. `status` 显示 `compiling`/`reloading` → 等 10-20 秒（限制 2）。
+2. 编辑器 CPU 接近 0 → 失焦被限流，拉到前台（限制 1）。
+3. 在前台、CPU 正常，命令仍全部超时 → connector 锁死（限制 4），按 Ctrl+Alt+R。
+4. 以上都无效才重启 Unity。
 
 ## 清理
 

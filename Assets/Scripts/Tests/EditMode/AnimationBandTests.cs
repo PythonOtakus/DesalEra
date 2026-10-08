@@ -67,5 +67,39 @@ namespace DesalEra.Tests
             Assert.IsTrue(clip.isLooping,
                 state + " must loop; a Playables clip with loopTime off freezes on its last frame");
         }
+
+        [TestCase("SwimForward", false)]
+        [TestCase("Idle", true)]
+        [TestCase("Walk", true)]
+        public void BakedClip_KeepsTheSourceBodyOrientation(string state, bool upright)
+        {
+            var clip = Resources.Load<AnimationClip>("Survivor_" + state);
+            var model = Resources.Load<GameObject>("Survivor");
+            Assert.IsNotNull(clip, state + " clip missing");
+            Assert.IsNotNull(model, "survivor model missing");
+
+            var body = Object.Instantiate(model);
+            try
+            {
+                Transform hips = null, head = null;
+                foreach (var t in body.GetComponentsInChildren<Transform>(true))
+                {
+                    if (t.name == "Hips") hips = t;
+                    if (t.name == "Head") head = t;
+                }
+
+                clip.SampleAnimation(body, clip.length * 0.37f);
+                float rise = (head.position - hips.position).normalized.y;
+
+                if (upright)
+                    Assert.Greater(rise, 0.9f, state + " should stand upright");
+                else
+                    Assert.Less(rise, 0.6f, state + " should lie face down, as authored");
+            }
+            finally
+            {
+                Object.DestroyImmediate(body);
+            }
+        }
     }
 }

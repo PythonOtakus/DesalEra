@@ -96,6 +96,16 @@ namespace DesalEra.Unity
         /// <summary>Metres covered by one loop of the current clip at playback speed 1.</summary>
         public float CurrentCycleMeters => CycleMetersFor(_currentState);
 
+        /// <summary>
+        /// Mixer weight of a state, 0 to 1. Lets placement that depends on the pose
+        /// follow a cross-fade instead of jumping at its start.
+        /// </summary>
+        public float WeightOf(string state)
+        {
+            if (!_graphBuilt || !_inputByState.TryGetValue(state, out int input)) return 0f;
+            return _mixer.GetInputWeight(input);
+        }
+
         private void Awake()
         {
             _avatar = GetComponent<PlayerAvatar>();

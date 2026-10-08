@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+﻿using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
@@ -15,30 +13,29 @@ namespace DesalEra.EditorTools
     /// playable in the editor and empty in every build. PlayerAnimator drives the baked
     /// clips through a Playables graph instead, which has no asset to serialise.
     ///
-    /// Two problems have to be solved for these clips to drive the character, and both
-    /// are invisible until the model is actually rendered.
+    /// An AnimationClip inside an FBX is a sub-asset, not a Component, so it cannot be
+    /// loaded from Resources; baking it to a .anim file fixes that. The harder part is
+    /// that Meshy exports the animations and the character as separate rigs that agree
+    /// on the skeleton but not on anything written in the file:
     ///
-    /// Paths. An AnimationClip inside an FBX is a sub-asset, not a Component, so it
-    /// cannot be reached by name at runtime and cannot be loaded from Resources. Baking
-    /// it to a .anim file fixes that. Meshy also writes the animation and the character
-    /// as separate exports whose rigs disagree on naming: the animation roots the rig at
-    /// "target_character" and prefixes bones with "mixamorig:", while the character hangs
-    /// "Armature" off the root with unprefixed bones. Every binding path is therefore
-    /// resolved against the character rig that is actually in the project, by longest
-    /// unambiguous suffix match.
+    /// Names. The animation prefixes bones with "mixamorig:" and numbers the spine from
+    /// the hips up (Spine, Spine1, Spine2); the character numbers it from the chest down
+    /// (Spine02, Spine01, Spine). Matching by name alone drives the chest with the
+    /// lower back and drops the rest of the spine.
     ///
-    /// Bind pose. The two rigs do not even agree on their rest orientation -- LeftArm
-    /// rests at (352,240,2) on the character and (59,180,344) in the animation. A clip
-    /// stores absolute local rotations, so applying one rig's clip to the other's bones
-    /// drives the arms straight over the head and bows the head at the chest. Each curve
-    /// is therefore retargeted as a delta measured from the source rest pose and
-    /// re-applied on the character's own rest pose:
+    /// Rest pose. The transforms an animation FBX imports with are not the bind pose but
+    /// a frame of the motion, so each file has a different "rest". Retargeting as a
+    /// delta from that rest subtracts the very pose the clip is about: the swim export
+    /// rests lying face down, so its stroke baked as an upright figure paddling in
+    /// place, and the walk exports rest with arms down, which left the character in a
+    /// T-pose. The bind poses themselves are identical (checked against the skinned
+    /// export, joint for joint), so the pose is copied in world space instead: each
+    /// frame is sampled on the source rig and every character bone is given the world
+    /// rotation of its counterpart. No rest pose from the animation file is ever read.
     ///
-    ///     out(t) = charRest * inverse(animRest) * src(t)
-    ///
-    /// This is the only part of the pipeline that cannot be verified by inspecting
-    /// curves: a bake can bind every path correctly, report zero unresolved bindings,
-    /// and still pose the character wrongly. It was confirmed by rendering the result.
+    /// None of this shows up in the curves. A bake can bind every bone, report nothing
+    /// unresolved and still pose the character wrongly; it has to be checked by sampling
+    /// the result and comparing body directions against the source.
     /// </summary>
     public static class SurvivorClipBaker
     {
@@ -49,37 +46,26 @@ namespace DesalEra.EditorTools
         // Stripped from every animation bone name before matching.
         private const string BonePrefix = "mixamorig:";
 
-        /// <summary>
-        /// Bones that make up one arm, proximal to distal, paired with the share of the
-        /// swing each one carries.
-        ///
-        /// The swing is split rather than applied to the clavicle alone because a single
-        /// 67 degree rotation tears the mesh open at the armpit. Vertices around the
-        /// shoulder are weighted across the spine, the clavicle and the upper arm, so
-        /// turning one of those joints by the full amount drags them apart. Handing each
-        /// joint part of the rotation keeps every joint's deformation small, which is the
-        /// same reason a rigger never corrects an A-pose on the shoulder alone.
-        /// </summary>
-        private static readonly (string Bone, float Weight)[] ArmChain =
-        {
-            ("LeftShoulder", 0.45f),
-            ("LeftArm", 0.40f),
-            ("LeftForeArm", 0.15f),
-            ("RightShoulder", 0.45f),
-            ("RightArm", 0.40f),
-            ("RightForeArm", 0.15f),
-        };
+        /// <summary>The bone whose position is animated as well as its rotation.</summary>
+        private const string RootBone = "Hips";
 
         /// <summary>
-        /// How far the arms are swung from straight out towards straight down.
-        ///
-        /// 90 degrees would hang them against the body, which reads as stiff. Stopping
-        /// short leaves a slight outward angle, the A-pose a standing person actually
-        /// holds. Measured on this rig the rest pose points 0.98 along the character's
-        /// left with only 0.19 of drop over a 0.54 m arm, so the swing needed is close to
-        /// the full quarter turn.
+        /// Character bone names that differ from the animation rig's. Everything not
+        /// listed matches by name, ignoring case.
         /// </summary>
-        private const float ArmHangDegrees = 78f;
+        private static readonly Dictionary<string, string> AnimationNameFor =
+            new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase)
+            {
+                { "Spine02", "Spine" },
+                { "Spine01", "Spine1" },
+                { "Spine", "Spine2" },
+            };
+
+        /// <summary>States that cycle until gameplay leaves them; everything else is one-shot.</summary>
+        public static readonly HashSet<string> LoopingStates = new HashSet<string>(System.StringComparer.Ordinal)
+        {
+            "Idle", "Walk", "Run", "SwimIdle", "SwimForward", "LadderClimbLoop", "RopeHangIdle",
+        };
 
         /// <summary>
         /// Menu entry for re-baking after the source FBX or the character model changes.
@@ -94,11 +80,9 @@ namespace DesalEra.EditorTools
 
         public static string BakeAll()
         {
-            // Rebuilding the controller deletes and recreates the asset, which invalidates
-            // whatever a running player already resolved from Resources. The survivor is
-            // then left with a destroyed controller reference that reads as null, and the
-            // only symptom is a character that silently does not animate. Baking is an
-            // edit-time step anyway.
+            // Replacing a clip asset invalidates whatever a running player already
+            // resolved from Resources, and the only symptom is a character that silently
+            // stops animating. Baking is an edit-time step anyway.
             if (EditorApplication.isPlaying)
             {
                 const string message = "ABORTED: cannot bake while in play mode; exit play and re-run";
@@ -106,30 +90,32 @@ namespace DesalEra.EditorTools
                 return message;
             }
 
-            var log = new System.Text.StringBuilder();
-
-            var character = LoadRig(CharacterModelPath);
-            if (character == null)
+            var characterPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(CharacterModelPath);
+            if (characterPrefab == null)
             {
                 Debug.LogError($"[DesalEra] character model missing at {CharacterModelPath}");
                 return "ABORTED: no character rig";
             }
 
-            log.Append("character bones=").Append(character.Count).Append(" ");
+            var log = new System.Text.StringBuilder();
 
             // Every FBX dropped into the folder is baked, rather than a list kept in code.
             // Meshy delivers one archive per animation, each holding a single clip, so a
-            // hardcoded list meant editing and recompiling the baker for every new
-            // download. The state name comes from the file name, which keeps the asset
-            // name and the Animator state from drifting apart.
+            // hardcoded list meant editing and recompiling the baker for every download.
             var sources = DiscoverSources();
             log.Append("sources=").Append(sources.Count).Append(" ");
 
-            foreach (string fbxName in sources)
+            var character = Object.Instantiate(characterPrefab);
+            character.hideFlags = HideFlags.HideAndDontSave;
+            try
             {
-                Bake(fbxName, StateNameFor(fbxName), character, log);
+                foreach (string fbxName in sources)
+                    Bake(fbxName, StateNameFor(fbxName), character, log);
             }
-
+            finally
+            {
+                Object.DestroyImmediate(character);
+            }
 
             AssetDatabase.SaveAssets();
             return log.ToString();
@@ -155,15 +141,9 @@ namespace DesalEra.EditorTools
         }
 
         /// <summary>
-        /// "Survivor_Walk" becomes "Walk", which is both the clip name and the Animator
-        /// state name.
+        /// "Survivor_Walk" becomes "Walk", which is both the clip name and the state name
+        /// PlayerAnimator plays it under.
         /// </summary>
-        /// <summary>States that cycle until gameplay leaves them; everything else is one-shot.</summary>
-        public static readonly HashSet<string> LoopingStates = new HashSet<string>(System.StringComparer.Ordinal)
-        {
-            "Idle", "Walk", "Run", "SwimIdle", "SwimForward", "LadderClimbLoop", "RopeHangIdle",
-        };
-
         private static string StateNameFor(string fbxName)
         {
             const string prefix = "Survivor_";
@@ -172,46 +152,11 @@ namespace DesalEra.EditorTools
                 : fbxName;
         }
 
-        /// <summary>
-        /// Transform paths of a rig, relative to its own root, mapped to the transforms
-        /// themselves so rest poses can be read straight off them.
-        ///
-        /// <paramref name="stripBonePrefix"/> is set for the animation rig only. ResolvePath
-        /// strips "mixamorig:" before it looks anything up, so the source rig has to be
-        /// keyed the same way or the two sides of the match cannot be compared. The
-        /// character rig is never stripped: its keys are the paths written into the baked
-        /// curves, so they have to stay exactly as Unity sees them.
-        /// </summary>
-        private static Dictionary<string, Transform> LoadRig(string assetPath, bool stripBonePrefix = false)
+        private static string StripPrefix(string name)
         {
-            var rig = new Dictionary<string, Transform>(System.StringComparer.OrdinalIgnoreCase);
-
-            var model = AssetDatabase.LoadAssetAtPath<GameObject>(assetPath);
-            if (model == null) return rig;
-
-            foreach (var t in model.GetComponentsInChildren<Transform>(true))
-            {
-                if (t == model.transform) continue;
-
-                string path = RelativePath(t, model.transform);
-                if (stripBonePrefix) path = StripPrefixPerSegment(path);
-
-                rig[path] = t;
-            }
-
-            return rig;
-        }
-
-        private static string StripPrefixPerSegment(string path)
-        {
-            var segments = path.Split('/');
-            for (int i = 0; i < segments.Length; i++)
-            {
-                if (segments[i].StartsWith(BonePrefix, System.StringComparison.OrdinalIgnoreCase))
-                    segments[i] = segments[i].Substring(BonePrefix.Length);
-            }
-
-            return string.Join("/", segments);
+            return name.StartsWith(BonePrefix, System.StringComparison.OrdinalIgnoreCase)
+                ? name.Substring(BonePrefix.Length)
+                : name;
         }
 
         private static string RelativePath(Transform node, Transform root)
@@ -224,168 +169,122 @@ namespace DesalEra.EditorTools
             return string.Join("/", stack);
         }
 
-        /// <summary>
-        /// Rotation that swings an arm bone's subtree partway towards hanging down.
-        ///
-        /// The axis is derived from the rig rather than dialled in: it is whatever axis
-        /// takes the bone's actual direction to its child towards straight down. A
-        /// hardcoded Euler here would be silently wrong for any other model and would
-        /// encode nothing about why the number is what it is.
-        ///
-        /// The result is expressed in the bone's own frame so it can be post-multiplied
-        /// onto the rest rotation, which rotates the whole subtree about the bone while
-        /// leaving every joint angle inside it alone.
-        /// </summary>
-        private static Quaternion ArmSwingCorrection(Transform bone, float degrees)
+        /// <summary>One character bone and the animation bone that drives it.</summary>
+        private sealed class BonePair
         {
-            if (bone == null || bone.childCount == 0) return Quaternion.identity;
-            if (degrees <= 0f) return Quaternion.identity;
+            public Transform Character;
+            public Transform Source;
+            public string Path;
+            public bool AnimatePosition;
+            public readonly List<Keyframe>[] Rotation = NewChannels(4);
+            public readonly List<Keyframe>[] Position = NewChannels(3);
+            public Quaternion Previous;
+            public bool HasPrevious;
 
-            Vector3 origin = bone.localToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
-            Vector3 tip = bone.GetChild(0).localToWorldMatrix.MultiplyPoint3x4(Vector3.zero);
-            Vector3 current = tip - origin;
-
-            // A zero-length child offset means the rig is not laid out the way this
-            // correction assumes. Leaving the bone alone beats rotating about a
-            // meaningless axis.
-            if (current.sqrMagnitude < 1e-8f) return Quaternion.identity;
-
-            current.Normalize();
-
-            Vector3 down = Vector3.down;
-            Vector3 axis = Vector3.Cross(current, down);
-
-            // Already vertical, or the cross product vanishes. Nothing to swing.
-            if (axis.sqrMagnitude < 1e-8f) return Quaternion.identity;
-            axis.Normalize();
-
-            // Never swing past vertical. The chain is rotated by every bone in sequence,
-            // so a bone late in the chain may already be closer to hanging than the share
-            // it was handed suggests.
-            float angle = Mathf.Min(degrees, Vector3.Angle(current, down));
-            if (angle <= 0f) return Quaternion.identity;
-
-            // A rotation about a fixed axis scaled by a fraction is the same axis at the
-            // scaled angle, so the local axis can be derived once from the world axis.
-            Quaternion boneWorldInverse = Quaternion.Inverse(bone.localToWorldMatrix.rotation);
-            Vector3 localAxis = boneWorldInverse * axis;
-
-            return Quaternion.AngleAxis(angle, localAxis);
+            private static List<Keyframe>[] NewChannels(int count)
+            {
+                var channels = new List<Keyframe>[count];
+                for (int i = 0; i < count; i++) channels[i] = new List<Keyframe>();
+                return channels;
+            }
         }
 
         /// <summary>
-        /// Rest rotation for a character bone, with its share of the arm swing folded in.
+        /// Pairs every character bone with its animation counterpart, parents first so a
+        /// bone's world rotation is set after its parent's when sampling.
         /// </summary>
-        private static Quaternion CorrectedRest(Transform bone)
+        private static List<BonePair> PairBones(GameObject character, GameObject source, out List<string> unmatched)
         {
-            Quaternion rest = bone.localRotation;
-
-            foreach (var (name, weight) in ArmChain)
+            var sourceByName = new Dictionary<string, Transform>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (var t in source.GetComponentsInChildren<Transform>(true))
             {
-                if (!bone.name.Equals(name, System.StringComparison.OrdinalIgnoreCase)) continue;
-                rest *= ArmSwingCorrection(bone, ArmHangDegrees * weight);
-                break;
+                if (t == source.transform) continue;
+                sourceByName[StripPrefix(t.name)] = t;
             }
 
-            return rest;
-        }
+            var pairs = new List<BonePair>();
+            unmatched = new List<string>();
 
-        /// <summary>
-        /// Maps one animation binding path onto the character rig. Returns null when no
-        /// bone matches, or when the tail is ambiguous.
-        ///
-        /// Shorter trailing segments are tried after longer ones, so the animation's
-        /// leading wrapper node is dropped without being named: "Hips/Spine" fails
-        /// against a rig whose spine is "Armature/Hips/Spine02/Spine01/Spine" at full
-        /// length but matches at one segment. Trying the longest tail first keeps a
-        /// repeated bone name from resolving to the wrong one.
-        /// </summary>
-        private static string ResolvePath(string path, Dictionary<string, Transform> rig)
-        {
-            if (string.IsNullOrEmpty(path)) return null;
-
-            var segments = new List<string>();
-            foreach (string raw in path.Split('/'))
+            // GetComponentsInChildren walks depth first, which is the parents-first
+            // order sampling depends on.
+            foreach (var t in character.GetComponentsInChildren<Transform>(true))
             {
-                string name = raw.StartsWith(BonePrefix, System.StringComparison.OrdinalIgnoreCase)
-                    ? raw.Substring(BonePrefix.Length)
-                    : raw;
-                if (name.Length > 0) segments.Add(name);
-            }
+                if (t == character.transform) continue;
+                if (t.GetComponent<Renderer>() != null) continue;
+                if (t.name == "Armature") continue;
 
-            for (int take = segments.Count; take >= 1; take--)
-            {
-                string found = null;
-                bool ambiguous = false;
-
-                foreach (string candidate in rig.Keys)
+                string wanted = AnimationNameFor.TryGetValue(t.name, out string alias) ? alias : t.name;
+                if (!sourceByName.TryGetValue(wanted, out Transform match))
                 {
-                    var modelSegments = candidate.Split('/');
-                    if (modelSegments.Length < take) continue;
-
-                    bool allMatch = true;
-                    for (int i = 0; i < take; i++)
-                    {
-                        if (!string.Equals(modelSegments[modelSegments.Length - take + i],
-                                           segments[segments.Count - take + i],
-                                           System.StringComparison.OrdinalIgnoreCase))
-                        {
-                            allMatch = false;
-                            break;
-                        }
-                    }
-
-                    if (!allMatch) continue;
-
-                    // Two bones sharing a name in different subtrees would make this pick
-                    // a target at random. Refusing is safer: a missing bone is obvious, a
-                    // bone driven by the wrong subtree is not.
-                    if (found != null) { ambiguous = true; break; }
-                    found = candidate;
+                    unmatched.Add(t.name);
+                    continue;
                 }
 
-                if (ambiguous) return null;
-                if (found != null) return found;
+                pairs.Add(new BonePair
+                {
+                    Character = t,
+                    Source = match,
+                    Path = RelativePath(t, character.transform),
+                    AnimatePosition = t.name.Equals(RootBone, System.StringComparison.OrdinalIgnoreCase),
+                });
             }
 
-            return null;
+            return pairs;
         }
 
-        private static void Bake(string fbxName, string clipName,
-            Dictionary<string, Transform> character, System.Text.StringBuilder log)
+        private static void Bake(string fbxName, string clipName, GameObject character,
+            System.Text.StringBuilder log)
         {
             string fbxPath = SourceFolder + "/" + fbxName + ".fbx";
             string outPath = OutputFolder + "/" + fbxName + ".anim";
 
-            var source = FindClip(fbxPath);
-            if (source == null)
+            var clip = FindClip(fbxPath);
+            var sourcePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(fbxPath);
+            if (clip == null || sourcePrefab == null)
             {
                 log.Append(clipName).Append(": NO CLIP in ").Append(fbxName).Append(" || ");
                 return;
             }
 
-            var sourceRig = LoadRig(fbxPath, stripBonePrefix: true);
-            if (sourceRig.Count == 0)
-            {
-                log.Append(clipName).Append(": no rig in ").Append(fbxName).Append(" || ");
-                return;
-            }
+            var source = Object.Instantiate(sourcePrefab);
+            source.hideFlags = HideFlags.HideAndDontSave;
 
-            // Group the source curves by bone path: rotation, position and scale for one
-            // bone are four-plus curves that have to be read together to be retargeted.
-            var byPath = new Dictionary<string, Dictionary<string, AnimationCurve>>(System.StringComparer.Ordinal);
-            foreach (var binding in AnimationUtility.GetCurveBindings(source))
-            {
-                var curve = AnimationUtility.GetEditorCurve(source, binding);
-                if (curve == null) continue;
+            // Bones that a previous clip moved but this one does not would otherwise keep
+            // that clip's last pose, and the unanimated ones are supposed to hold bind.
+            var bind = new Dictionary<Transform, (Vector3, Quaternion)>();
+            foreach (var t in character.GetComponentsInChildren<Transform>(true))
+                bind[t] = (t.localPosition, t.localRotation);
 
-                if (!byPath.TryGetValue(binding.path, out var group))
+            List<BonePair> pairs;
+            List<string> unmatched;
+            try
+            {
+                pairs = PairBones(character, source, out unmatched);
+
+                float rate = clip.frameRate > 0f ? clip.frameRate : 30f;
+                int frames = Mathf.Max(1, Mathf.RoundToInt(clip.length * rate));
+
+                for (int f = 0; f <= frames; f++)
                 {
-                    group = new Dictionary<string, AnimationCurve>();
-                    byPath[binding.path] = group;
-                }
+                    float time = clip.length * f / frames;
+                    clip.SampleAnimation(source, time);
 
-                group[binding.propertyName] = curve;
+                    foreach (var pair in pairs)
+                    {
+                        pair.Character.rotation = pair.Source.rotation;
+                        if (pair.AnimatePosition) pair.Character.position = pair.Source.position;
+                        Record(pair, time);
+                    }
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(source);
+                foreach (var entry in bind)
+                {
+                    entry.Key.localPosition = entry.Value.Item1;
+                    entry.Key.localRotation = entry.Value.Item2;
+                }
             }
 
             // Mecanim clip, not a legacy one: Animator and the legacy Animation component
@@ -394,42 +293,27 @@ namespace DesalEra.EditorTools
             {
                 name = clipName,
                 legacy = false,
-                frameRate = source.frameRate > 0f ? source.frameRate : 30f,
+                frameRate = clip.frameRate > 0f ? clip.frameRate : 30f,
                 wrapMode = WrapMode.Loop
             };
 
             // The Meshy FBX exports ship with loopTime off, and Mecanim / Playables ignore
             // wrapMode, so without this every cyclic state played once and froze on its
             // last frame.
-            var settings = AnimationUtility.GetAnimationClipSettings(source);
+            var settings = AnimationUtility.GetAnimationClipSettings(clip);
             settings.loopTime = LoopingStates.Contains(clipName);
             AnimationUtility.SetAnimationClipSettings(baked, settings);
 
-            int bones = 0, dropped = 0;
-            var unresolved = new SortedSet<string>(System.StringComparer.Ordinal);
-
-            foreach (var pair in byPath)
+            foreach (var pair in pairs)
             {
-                string charPath = ResolvePath(pair.Key, character);
-                string animPath = ResolvePath(pair.Key, sourceRig);
-
-                if (charPath == null || animPath == null)
-                {
-                    dropped++;
-                    unresolved.Add(pair.Key);
-                    continue;
-                }
-
-                Transform charBone = character[charPath];
-                Transform animBone = sourceRig[animPath];
-
-                WriteRetargetedRotation(baked, charPath, pair.Value, charBone, animBone);
-                WriteRetargetedVector(baked, charPath, pair.Value, "m_LocalPosition",
-                    charBone.localPosition, animBone.localPosition);
-                WriteRetargetedVector(baked, charPath, pair.Value, "m_LocalScale",
-                    charBone.localScale, animBone.localScale);
-
-                bones++;
+                SetCurve(baked, pair.Path, "m_LocalRotation.x", pair.Rotation[0]);
+                SetCurve(baked, pair.Path, "m_LocalRotation.y", pair.Rotation[1]);
+                SetCurve(baked, pair.Path, "m_LocalRotation.z", pair.Rotation[2]);
+                SetCurve(baked, pair.Path, "m_LocalRotation.w", pair.Rotation[3]);
+                if (!pair.AnimatePosition) continue;
+                SetCurve(baked, pair.Path, "m_LocalPosition.x", pair.Position[0]);
+                SetCurve(baked, pair.Path, "m_LocalPosition.y", pair.Position[1]);
+                SetCurve(baked, pair.Path, "m_LocalPosition.z", pair.Position[2]);
             }
 
             // Re-baking over an existing file leaves the old curves in place, so the asset
@@ -438,127 +322,49 @@ namespace DesalEra.EditorTools
             AssetDatabase.DeleteAsset(outPath);
             AssetDatabase.CreateAsset(baked, outPath);
 
-            log.Append(clipName).Append(": ").Append(source.length.ToString("F2")).Append("s ")
-               .Append(bones).Append(" bones retargeted, ").Append(dropped).Append(" unresolved");
-
-            if (unresolved.Count > 0)
-            {
-                log.Append(" [");
-                int shown = 0;
-                foreach (string u in unresolved)
-                {
-                    if (shown++ >= 3) break;
-                    log.Append(u).Append(" | ");
-                }
-                log.Append("]");
-            }
-
+            log.Append(clipName).Append(": ").Append(clip.length.ToString("F2")).Append("s ")
+               .Append(pairs.Count).Append(" bones");
+            if (unmatched.Count > 0)
+                log.Append(", unmatched [").Append(string.Join(", ", unmatched)).Append("]");
             log.Append(" || ");
         }
 
-        /// <summary>
-        /// Rewrites one bone's rotation as a delta from the source rest pose, applied on
-        /// top of the character's rest pose.
-        /// </summary>
-        private static void WriteRetargetedRotation(AnimationClip baked, string charPath,
-            Dictionary<string, AnimationCurve> curves, Transform charBone, Transform animBone)
+        private static void Record(BonePair pair, float time)
         {
-            AnimationCurve cx, cy, cz, cw;
-            if (!curves.TryGetValue("m_LocalRotation.x", out cx) ||
-                !curves.TryGetValue("m_LocalRotation.y", out cy) ||
-                !curves.TryGetValue("m_LocalRotation.z", out cz) ||
-                !curves.TryGetValue("m_LocalRotation.w", out cw))
-                return;
+            Quaternion q = pair.Character.localRotation;
 
-            Quaternion charRest = CorrectedRest(charBone);
-            Quaternion animRest = animBone.localRotation;
-            Quaternion animRestInverse = Quaternion.Inverse(animRest);
+            // q and -q are the same rotation, but interpolating between keys of opposite
+            // sign takes the long way round and spins the bone a full turn mid-frame.
+            if (pair.HasPrevious && Quaternion.Dot(pair.Previous, q) < 0f)
+                q = new Quaternion(-q.x, -q.y, -q.z, -q.w);
+            pair.Previous = q;
+            pair.HasPrevious = true;
 
-            var times = UnionOfTimes(cx, cy, cz, cw);
-            var kx = new Keyframe[times.Count];
-            var ky = new Keyframe[times.Count];
-            var kz = new Keyframe[times.Count];
-            var kw = new Keyframe[times.Count];
+            pair.Rotation[0].Add(new Keyframe(time, q.x));
+            pair.Rotation[1].Add(new Keyframe(time, q.y));
+            pair.Rotation[2].Add(new Keyframe(time, q.z));
+            pair.Rotation[3].Add(new Keyframe(time, q.w));
 
-            for (int i = 0; i < times.Count; i++)
-            {
-                float t = times[i];
-
-                var q = new Quaternion(cx.Evaluate(t), cy.Evaluate(t), cz.Evaluate(t), cw.Evaluate(t));
-                float mag = Mathf.Sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-                if (mag > 1e-6f) q = new Quaternion(q.x / mag, q.y / mag, q.z / mag, q.w / mag);
-
-                Quaternion outRot = charRest * animRestInverse * q;
-                outRot.Normalize();
-
-                kx[i] = new Keyframe(t, outRot.x);
-                ky[i] = new Keyframe(t, outRot.y);
-                kz[i] = new Keyframe(t, outRot.z);
-                kw[i] = new Keyframe(t, outRot.w);
-            }
-
-            SetCurve(baked, charPath, "m_LocalRotation.x", kx);
-            SetCurve(baked, charPath, "m_LocalRotation.y", ky);
-            SetCurve(baked, charPath, "m_LocalRotation.z", kz);
-            SetCurve(baked, charPath, "m_LocalRotation.w", kw);
+            if (!pair.AnimatePosition) return;
+            Vector3 p = pair.Character.localPosition;
+            pair.Position[0].Add(new Keyframe(time, p.x));
+            pair.Position[1].Add(new Keyframe(time, p.y));
+            pair.Position[2].Add(new Keyframe(time, p.z));
         }
 
-        /// <summary>
-        /// Rewrites a position or scale track the same way: the offset the clip applies on
-        /// the source rig, applied on the character's own rest value.
-        /// </summary>
-        private static void WriteRetargetedVector(AnimationClip baked, string charPath,
-            Dictionary<string, AnimationCurve> curves, string prefix, Vector3 charRest, Vector3 animRest)
+        private static void SetCurve(AnimationClip clip, string path, string property, List<Keyframe> keys)
         {
-            AnimationCurve cx, cy, cz;
-            if (!curves.TryGetValue(prefix + ".x", out cx) ||
-                !curves.TryGetValue(prefix + ".y", out cy) ||
-                !curves.TryGetValue(prefix + ".z", out cz))
-                return;
+            if (keys.Count == 0) return;
 
-            var times = UnionOfTimes(cx, cy, cz);
-            var kx = new Keyframe[times.Count];
-            var ky = new Keyframe[times.Count];
-            var kz = new Keyframe[times.Count];
-
-            for (int i = 0; i < times.Count; i++)
-            {
-                float t = times[i];
-                Vector3 src = new Vector3(cx.Evaluate(t), cy.Evaluate(t), cz.Evaluate(t));
-                Vector3 result = charRest + (src - animRest);
-
-                kx[i] = new Keyframe(t, result.x);
-                ky[i] = new Keyframe(t, result.y);
-                kz[i] = new Keyframe(t, result.z);
-            }
-
-            SetCurve(baked, charPath, prefix + ".x", kx);
-            SetCurve(baked, charPath, prefix + ".y", ky);
-            SetCurve(baked, charPath, prefix + ".z", kz);
-        }
-
-        private static void SetCurve(AnimationClip clip, string path, string property, Keyframe[] keys)
-        {
-            if (keys.Length == 0) return;
+            var curve = new AnimationCurve(keys.ToArray());
+            for (int i = 0; i < curve.length; i++) curve.SmoothTangents(i, 0f);
 
             AnimationUtility.SetEditorCurve(clip, new EditorCurveBinding
             {
                 path = path,
                 type = typeof(Transform),
                 propertyName = property
-            }, new AnimationCurve(keys));
-        }
-
-        private static List<float> UnionOfTimes(params AnimationCurve[] curves)
-        {
-            var times = new SortedSet<float>();
-            foreach (var curve in curves)
-            {
-                if (curve == null) continue;
-                foreach (var key in curve.keys) times.Add(key.time);
-            }
-
-            return new List<float>(times);
+            }, curve);
         }
 
         /// <summary>
@@ -582,7 +388,5 @@ namespace DesalEra.EditorTools
 
             return null;
         }
-
-
     }
 }

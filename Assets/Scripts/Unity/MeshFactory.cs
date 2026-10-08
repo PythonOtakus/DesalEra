@@ -90,6 +90,16 @@ namespace DesalEra.Unity
             return Plank(width, thickness, length, 1f / Mathf.Max(uvMetresPerTile, 0.01f), "RoofSlab");
         }
 
+        /// <summary>
+        /// Flat floor covering a convex outline in the XZ plane, <paramref name="thickness"/>
+        /// deep and centred on Y = 0. Top UVs are planar in metres so boards keep their
+        /// size however the outline grows.
+        /// </summary>
+        public static Mesh Floor(Vector2[] outline, float thickness, float uvMetresPerTile)
+        {
+            return Extrude(outline, thickness, 1f / Mathf.Max(uvMetresPerTile, 0.01f), "DeckFloor", caps: true);
+        }
+
         /// <summary>Wide, thin deck board — reads as lumber rather than a square stick.</summary>
         private static Mesh Plank(float width, float depth, float length, float inv, string name)
         {
