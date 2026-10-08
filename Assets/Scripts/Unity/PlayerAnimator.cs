@@ -29,9 +29,23 @@ namespace DesalEra.Unity
         [SerializeField] private float walkThreshold = 0.4f;
         [SerializeField] private float runThreshold = 3.8f;
 
+        [Header("Hysteresis")]
+        [Tooltip("Extra margin below walkThreshold before Idle wins, to stop Idle/Walk flicker.")]
+        [SerializeField] private float walkExitMargin = 0.18f;
+
+        [Tooltip("Extra margin below runThreshold before Walk wins, to stop Walk/Run flicker.")]
+        [SerializeField] private float runExitMargin = 0.45f;
+
         [Header("Blending")]
         [Tooltip("Seconds to blend between one clip and the next.")]
-        [SerializeField] private float crossFadeSeconds = 0.18f;
+        [SerializeField] private float crossFadeSeconds = 0.22f;
+
+        [Header("Synthetic root motion (in-place clips)")]
+        [Tooltip("Metres the survivor should travel per full SwimForward loop. Source clips are in-place.")]
+        [SerializeField] private float swimForwardCycleMeters = 2.6f;
+
+        [SerializeField] private float walkCycleMeters = 1.15f;
+        [SerializeField] private float runCycleMeters = 2.0f;
 
         /// <summary>
         /// Clips baked for states the gameplay does not reach yet. Swimming needs the
@@ -57,6 +71,10 @@ namespace DesalEra.Unity
 
         private string _currentState = string.Empty;
 
+        // Last band chosen by UpdateForSpeed. Kept across frames so hysteresis can
+        // resist thrashing when speed sits on a threshold.
+        private string _speedBand = "Idle";
+
         // The input that owns the output, and the one fading out under it. Exactly two
         // weights are ever touched, which is what makes the blend verifiable by reading
         // two numbers rather than auditing a list of every input touched so far.
@@ -65,11 +83,18 @@ namespace DesalEra.Unity
         private int _fadingTo = -1;
         private float _fadeElapsed;
 
+        // Used to turn in-place clip progress into planar travel.
+        private string _motionState = string.Empty;
+        private float _motionClipTime;
+
         /// <summary>True when the locomotion clips were found and bound.</summary>
         public bool HasClips => _graphBuilt;
 
         /// <summary>Clip currently selected, for the HUD and tests.</summary>
         public string CurrentState => _currentState;
+
+        /// <summary>Metres covered by one loop of the current clip at playback speed 1.</summary>
+        public float CurrentCycleMeters => CycleMetersFor(_currentState);
 
         private void Awake()
         {
@@ -162,15 +187,39 @@ namespace DesalEra.Unity
 
         /// <summary>
         /// Selects a clip from the player's speed. Speed rather than the input axes, so
-        /// walking into a wall stops the legs.
+        /// walking into a wall stops the legs. Hysteresis keeps the band from flicking
+        /// when acceleration crosses a threshold every other frame.
         /// </summary>
         public void UpdateForSpeed(float speedMPerS)
         {
             if (!_graphBuilt) return;
 
-            if (speedMPerS >= runThreshold) Select("Run");
-            else if (speedMPerS >= walkThreshold) Select("Walk");
-            else Select("Idle");
+            _speedBand = BandForSpeed(speedMPerS, _speedBand);
+            Select(_speedBand);
+        }
+
+        /// <summary>
+        /// Idle / Walk / Run band for a speed, with exit margins so leaving a band is
+        /// harder than entering it. Exposed for EditMode tests.
+        /// </summary>
+        public string BandForSpeed(float speedMPerS, string currentBand)
+        {
+            switch (currentBand)
+            {
+                case "Run":
+                    if (speedMPerS >= runThreshold - runExitMargin) return "Run";
+                    return speedMPerS >= walkThreshold ? "Walk" : "Idle";
+
+                case "Walk":
+                    if (speedMPerS >= runThreshold) return "Run";
+                    if (speedMPerS >= walkThreshold - walkExitMargin) return "Walk";
+                    return "Idle";
+
+                default:
+                    if (speedMPerS >= runThreshold) return "Run";
+                    if (speedMPerS >= walkThreshold) return "Walk";
+                    return "Idle";
+            }
         }
 
         /// <summary>
@@ -178,13 +227,76 @@ namespace DesalEra.Unity
         /// cannot express. Unknown names are ignored rather than throwing, because this is
         /// called from movement code that must not be able to break the frame.
         /// </summary>
-        public bool Play(string state)
+        public bool Play(string state, bool instant = false)
         {
             if (!_graphBuilt) return false;
             if (!_inputByState.ContainsKey(state)) return false;
 
-            Select(state);
+            Select(state, instant);
             return true;
+        }
+
+        /// <summary>
+        /// Scales the active clip's playback. Used so swim/walk strokes stay locked to
+        /// travel speed instead of skating at a fixed anim rate.
+        /// </summary>
+        public void SetPlaybackSpeed(float speed)
+        {
+            if (!_graphBuilt || _activeInput < 0) return;
+            if (!_playableByInput.TryGetValue(_activeInput, out var playable)) return;
+            playable.SetSpeed(Mathf.Clamp(speed, 0.2f, 2.2f));
+        }
+
+        /// <summary>
+        /// Planar displacement implied by clip time advance since the last call. Source
+        /// survivor clips are in-place (no root XZ curves), so travel is synthesised from
+        /// <see cref="swimForwardCycleMeters"/> / walk / run cycle lengths.
+        /// </summary>
+        public Vector3 ConsumePlanarAnimDelta(Vector3 facing)
+        {
+            if (!_graphBuilt || _activeInput < 0) return Vector3.zero;
+            if (!_playableByInput.TryGetValue(_activeInput, out var playable)) return Vector3.zero;
+
+            float meters = CycleMetersFor(_currentState);
+            if (meters <= 0f)
+            {
+                _motionState = _currentState;
+                _motionClipTime = (float)playable.GetTime();
+                return Vector3.zero;
+            }
+
+            var clip = playable.GetAnimationClip();
+            float length = clip != null ? clip.length : 0f;
+            if (length < 1e-4f) return Vector3.zero;
+
+            float time = (float)playable.GetTime();
+            if (_motionState != _currentState)
+            {
+                _motionState = _currentState;
+                _motionClipTime = time;
+                return Vector3.zero;
+            }
+
+            float delta = time - _motionClipTime;
+            // Loop wrap: time jumped backwards across the clip boundary.
+            if (delta < -length * 0.5f) delta += length;
+            if (delta < 0f) delta = 0f;
+            _motionClipTime = time;
+
+            facing.y = 0f;
+            if (facing.sqrMagnitude < 1e-6f) return Vector3.zero;
+            return facing.normalized * (delta / length) * meters;
+        }
+
+        private float CycleMetersFor(string state)
+        {
+            switch (state)
+            {
+                case "SwimForward": return swimForwardCycleMeters;
+                case "Walk": return walkCycleMeters;
+                case "Run": return runCycleMeters;
+                default: return 0f;
+            }
         }
 
         private void Select(string state, bool instant = false)
@@ -209,12 +321,18 @@ namespace DesalEra.Unity
             if (to == _activeInput) return;
 
             _currentState = state;
+            _motionState = string.Empty;
 
             if (instant || crossFadeSeconds <= 0f || _activeInput < 0)
             {
                 SnapTo(to);
                 return;
             }
+
+            // Interrupt an in-flight blend cleanly: keep only the current active weight
+            // so a third clip cannot leave a stranded non-zero input from the old fade.
+            for (int i = 0; i < _mixer.GetInputCount(); i++)
+                _mixer.SetInputWeight(i, i == _activeInput ? 1f : 0f);
 
             // Start the incoming clip from its beginning. Starting it wherever the previous
             // play left it produces a visible jump on every state change.
@@ -244,6 +362,13 @@ namespace DesalEra.Unity
             _fadingFrom = -1;
             _fadingTo = -1;
             _fadeElapsed = 0f;
+            _motionState = string.Empty;
+
+            if (_playableByInput.TryGetValue(to, out var playable))
+            {
+                playable.SetTime(0d);
+                playable.SetSpeed(1d);
+            }
         }
 
         private void Update()

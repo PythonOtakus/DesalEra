@@ -158,6 +158,12 @@ namespace DesalEra.EditorTools
         /// "Survivor_Walk" becomes "Walk", which is both the clip name and the Animator
         /// state name.
         /// </summary>
+        /// <summary>States that cycle until gameplay leaves them; everything else is one-shot.</summary>
+        public static readonly HashSet<string> LoopingStates = new HashSet<string>(System.StringComparer.Ordinal)
+        {
+            "Idle", "Walk", "Run", "SwimIdle", "SwimForward", "LadderClimbLoop", "RopeHangIdle",
+        };
+
         private static string StateNameFor(string fbxName)
         {
             const string prefix = "Survivor_";
@@ -392,7 +398,12 @@ namespace DesalEra.EditorTools
                 wrapMode = WrapMode.Loop
             };
 
-            AnimationUtility.SetAnimationClipSettings(baked, AnimationUtility.GetAnimationClipSettings(source));
+            // The Meshy FBX exports ship with loopTime off, and Mecanim / Playables ignore
+            // wrapMode, so without this every cyclic state played once and froze on its
+            // last frame.
+            var settings = AnimationUtility.GetAnimationClipSettings(source);
+            settings.loopTime = LoopingStates.Contains(clipName);
+            AnimationUtility.SetAnimationClipSettings(baked, settings);
 
             int bones = 0, dropped = 0;
             var unresolved = new SortedSet<string>(System.StringComparer.Ordinal);

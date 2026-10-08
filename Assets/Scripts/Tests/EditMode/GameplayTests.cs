@@ -197,6 +197,23 @@ namespace DesalEra.Tests
         }
 
         [Test]
+        public void Raft_KeelSitsDeepEnoughForSwell()
+        {
+            // Posts must reach below typical swell amplitude or the shelter reads as
+            // perched on a film of water. KeelDepth covers ~1 m swell with margin.
+            Assert.GreaterOrEqual(RaftState.KeelDepthM, 1.2f);
+            Assert.Greater(RaftState.BaseDeckY, 0f);
+
+            var raft = new RaftState();
+            float minY = float.MaxValue;
+            foreach (var joint in raft.Gravity.Joints)
+                minY = Mathf.Min(minY, joint.Position.y);
+
+            Assert.LessOrEqual(minY, RaftState.WaterLevelY - 1.2f,
+                $"keel joint at {minY:F2} is too shallow under still water");
+        }
+
+        [Test]
         public void Raft_OpeningStateIsStructurallyStable()
         {
             var raft = new RaftState();
@@ -223,10 +240,11 @@ namespace DesalEra.Tests
             var raft = new RaftState();
             int before = raft.MemberCount;
 
-            Assert.IsNull(raft.TryPlace(BuildPiece.Column(), new Vector2Int(0, 1)));
+            // A deck corner, so the column lands on an existing joint and splits nothing.
+            Assert.IsNull(raft.TryPlace(BuildPiece.Column(), new Vector2Int(1, 1)));
             Assert.AreEqual(before + 1, raft.MemberCount);
 
-            string error = raft.TryPlace(BuildPiece.Column(), new Vector2Int(0, 1));
+            string error = raft.TryPlace(BuildPiece.Column(), new Vector2Int(1, 1));
             Assert.IsNotNull(error, "a second piece on an occupied cell must be refused");
             Assert.AreEqual(before + 1, raft.MemberCount, "and must not add a member");
         }
@@ -269,6 +287,24 @@ namespace DesalEra.Tests
 
             string error = raft.TryPlace(BuildPiece.Deck(), new Vector2Int(99, 99));
             Assert.IsNotNull(error, "the raft must have a buildable boundary");
+        }
+
+        [Test]
+        public void Raft_BuildingMustTouchTheExistingStructure()
+        {
+            var raft = new RaftState();
+            raft.Inventory.Add(ResourceKind.Plank, 50);
+            int before = raft.MemberCount;
+
+            // Two cells away with nothing in between — a floating island.
+            string error = raft.TryPlace(BuildPiece.Deck(), new Vector2Int(2, 0));
+            Assert.AreEqual("must connect to the existing structure", error);
+            Assert.AreEqual(before, raft.MemberCount);
+
+            Assert.IsNull(raft.TryPlace(BuildPiece.Deck(), new Vector2Int(1, 0)),
+                "an edge-adjacent cell must still be allowed");
+            Assert.IsNull(raft.TryPlace(BuildPiece.Deck(), new Vector2Int(2, 0)),
+                "after bridging, the next cell becomes reachable");
         }
 
         [Test]

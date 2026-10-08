@@ -92,6 +92,15 @@ namespace DesalEra.Structure
 
         public bool IsFailed;
 
+        /// <summary>
+        /// Area of cladding this member carries into the wind, in m2. Zero for bare
+        /// frame members, whose own wind load is already in the per-joint height term.
+        /// </summary>
+        public float WindAreaM2;
+
+        /// <summary>Horizontal unit normal of that cladding. Wind along it loads the panel fully.</summary>
+        public Vector3 WindNormal;
+
         // Capacities scale with cross-section, so a wider member is genuinely
         // stronger rather than merely heavier.
         public float AxialCapacityKn => MaterialProperties.MaxAxialLoadKn(Material, CrossSectionAreaM2);

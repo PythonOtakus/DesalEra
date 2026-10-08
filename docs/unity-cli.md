@@ -128,6 +128,72 @@ Get-Process -Id $p.Id | Stop-Process -Force
 
 **用 stdin 管道传代码**，避免 PowerShell 对 `$"` 字符串的解析冲突。
 
+## 玩法会话录制 / 复现（给 agent 排错）
+
+进 Play 后可用菜单 **DesalEra → Session → Start/Stop Recording**（快捷键 Ctrl+Shift+R / Ctrl+Shift+E），或 CLI：
+
+```powershell
+$cli = "C:\Users\Anantian\tools\unity-cli\unity-cli.exe"
+# 无参命令（推荐，避开 PowerShell 剥 JSON 引号的问题）
+& $cli session_start
+# …你自己操作一段时间…
+& $cli session_stop
+& $cli session_list
+& $cli session_status
+& $cli player_state
+& $cli player_eat
+```
+
+最省事的带参写法是逐个 `--参数名 值`，完全不经过 JSON：
+
+```powershell
+& $cli player_look --yaw 135 --pitch 20 --distance 15
+& $cli player_build --cell_x 1 --cell_y -1 --index 7 --level 0 --facing 2
+& $cli world_storm --on true
+```
+
+需要传整段 JSON 时用 `Start-Process -ArgumentList`，不要用 `& $cli --params '{"a":1}'`（引号会被剥掉）：
+
+```powershell
+function Cli([string]$cmd, [string]$json) {
+  Start-Process -FilePath $cli -ArgumentList @($cmd, '--params', $json) -NoNewWindow -Wait
+}
+Cli 'session' '{"action":"analyse","id":"session_20261007_123456"}'
+Cli 'session' '{"action":"replay","id":"session_20261007_123456","time_scale":2}'
+Cli 'player_move' '{"h":0,"v":1,"sprint":false}'
+Cli 'player_build' '{"cell_x":0,"cell_y":-1,"index":0}'
+Cli 'player_look' '{"yaw":90,"pitch":18,"distance":7}'
+```
+
+也可点主工具栏 Play 旁的 **Rec / Stop** 按钮开始/停止录制（无弹窗，结果只打 Console 日志；菜单 DesalEra → Session 与 Ctrl+Shift+R/E 同样静默）。
+
+录制文件：`SessionRecordings/*.json`（动作时间轴 + 0.25s 状态快照）。
+
+| 命令 | 参数 | 对应操作 |
+|---|---|---|
+| `session_start` / `session_stop` / `session_list` / `session_status` / `session_analyse` | — | 录制控制（analyse 默认识别最新文件） |
+| `session` | `action`,`id?`,… | replay / snapshot 等 |
+| `player_forward` / `back` / `left` / `right` / `stop` / `sprint` | — | 移动（无 JSON） |
+| `player_move` | `h`,`v`,`sprint` | 任意轴向移动 |
+| `player_look` | `yaw`,`pitch`,`distance?` | 右键环视 / 滚轮 |
+| `player_select` | `index` 0..7 | 1–8 选构件（甲板/立柱/浮筒/斜撑/淡化器/屋顶/墙/楼梯） |
+| `player_build` | `cell_x`,`cell_y`,`index?`,`level?`,`facing?` | 左键建造（level 0–2，facing 0东/1北/2西/3南；省略则用当前设置） |
+| `player_dismantle` | `cell_x`,`cell_y`,`level?` | 右键单击拆除（无竖向构件时拆以该点为角的屋顶） |
+| `player_rotate` | `facing?` | R 旋转朝向（省略则转一步） |
+| `player_level` | `level?` | Q 切换建造层（省略则循环） |
+| `shelter_demo` | — | 在开局筏上立四柱 + 屋顶并站到下面，端到端验证遮蔽 |
+| `house_demo` | — | 两层小屋：四柱 + 三面墙 + 一楼楼板 + 楼梯 + 上层四柱 + 屋顶，站到楼梯脚 |
+| `world_storm` | `on`,`wind?` | 立刻开始 / 结束风暴并做结构分析（会触发失效与坍塌） |
+| `player_preview` | `cell_x`,`cell_y` 或 `clear` | 让放置预览对准某格点（截图用）/ 交还鼠标 |
+| `player_eat` | — | E 吃口粮 |
+| `player_teleport` | `x`,`y?`,`z` | 传送（调试）；y 选楼层：4.8 落到一楼楼板，1.5 落到甲板 |
+| `player_ui` | `panel`=`pack`\|`none` | Tab / Esc |
+| `player_state` | — | 当前快照 |
+| `player_visual` | — | 根节点 vs 头/胸/包围盒中心，排查视觉跳变 |
+| `anim_diag` | — | 动画脚底/朝向诊断 |
+
+Agent 复现流程：你 `session_start` → 操作 → `session_stop` → 把 `SessionRecordings/*.json` 路径或 `session_analyse` 报告发给 agent → agent 用 `session` replay + `player_*` / `anim_diag` 逐步复现。
+
 ## 已验证的实验记录
 
 装好后立刻做了两个真实实验（都在 Play 模式、零重编译）：

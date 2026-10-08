@@ -150,6 +150,44 @@ namespace DesalEra.Game
             Health = Mathf.Min(MaxValue, Health + HealPerMinute * minutes);
         }
 
+        /// <summary>Stamina lost per minute standing in a storm with nothing overhead.</summary>
+        public float StormExposureStaminaPerMinute = 30f;
+
+        /// <summary>Health lost per minute standing in a storm with nothing overhead.</summary>
+        public float StormExposureHealthPerMinute = 6f;
+
+        /// <summary>Stamina recovery multiplier while resting under a roof in calm weather.</summary>
+        public float ShelterStaminaRecoveryMultiplier = 1.5f;
+
+        /// <summary>
+        /// Weather on top of the base drain. A storm only hurts a survivor with no roof
+        /// overhead, which is what gives a shelter a reason to exist; in calm weather a
+        /// roof is a place to recover faster.
+        /// </summary>
+        public void ApplyWeather(float minutes, bool storm, bool sheltered)
+        {
+            if (minutes <= 0f || IsDead) return;
+
+            if (storm)
+            {
+                if (sheltered) return;
+                Stamina = Mathf.Max(0f, Stamina - StormExposureStaminaPerMinute * minutes);
+                Health -= StormExposureHealthPerMinute * minutes;
+                if (Health <= 0f)
+                {
+                    Health = 0f;
+                    IsDead = true;
+                }
+                return;
+            }
+
+            if (sheltered)
+            {
+                float bonus = StaminaRecoveryPerMinute * (ShelterStaminaRecoveryMultiplier - 1f) * minutes;
+                Stamina = Mathf.Min(MaxValue, Stamina + bonus);
+            }
+        }
+
         /// <summary>Health a single emergency ration buys.</summary>
         public const float EmergencyRationHeal = 18f;
 

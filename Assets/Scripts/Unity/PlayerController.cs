@@ -1,4 +1,6 @@
-﻿using DesalEra.Game;
+﻿using System.Collections.Generic;
+using DesalEra.Game;
+using DesalEra.Unity.Session;
 using UnityEngine;
 
 namespace DesalEra.Unity
@@ -26,6 +28,7 @@ namespace DesalEra.Unity
     /// Which surface the survivor is on is asked of the raft, not decided here, so
     /// building more deck genuinely opens up more ground to walk on.
     /// </summary>
+    [DefaultExecutionOrder(100)]
     public sealed class PlayerController : MonoBehaviour
     {
 [Header("Movement")]
@@ -38,21 +41,35 @@ namespace DesalEra.Unity
         [SerializeField] private float deceleration = 26f;
 
         [Header("Swimming")]
-        [Tooltip("Speed multiplier in the water. Swimming is slower than walking.")]
-        [SerializeField] private float swimSpeedMultiplier = 0.5f;
-
         [Tooltip("Extra stamina cost per second while swimming, on top of moving.")]
         [SerializeField] private float swimCostPerSecond = 1.1f;
 
         [Tooltip("How far out to sea the survivor may swim, in metres.")]
         [SerializeField] private float swimRadius = 90f;
 
+        [Tooltip("Max turn rate while swimming (degrees/sec).")]
+        [SerializeField] private float swimTurnDegreesPerSecond = 110f;
+
+        [Tooltip("SwimForward playback speed at full stick.")]
+        [SerializeField] private float swimPlaybackMax = 1.15f;
+
+        [Tooltip("SwimForward playback speed at light stick.")]
+        [SerializeField] private float swimPlaybackMin = 0.65f;
+
         [Header("Costs")]
         [Tooltip("Survival units spent per second of continuous work, before recovery.")]
         [SerializeField] private float workCostPerSecond = 1.6f;
 
-        private const float DeckEyeHeight = 0.6f;
-        private const float SwimEyeDepth = 0.25f;
+        // How far below the local swell the player root sits while swimming. Mean water
+        // is 0 but the drawn sea rides SeaWave (~±1 m); pinning to WaterLevelY left the
+        // survivor hanging in mid-air relative to the visible surface.
+        private const float SwimRootBelowSurface = 0.85f;
+        private const float DefaultRootAboveSole = 0.05f;
+
+        // Half of MeshFactory Plank depth (thickness * 0.38). Joints sit on the plank
+        // centreline; soles rest on the top face.
+        private static readonly float DeckPlankHalfDepthM =
+            Mathf.Clamp(Mathf.Sqrt(0.09f) * 1.15f, 0.14f, 0.7f) * 0.38f * 0.5f;
 
         private GameBootstrap _world;
         private ThirdPersonCamera _camera;
@@ -62,14 +79,48 @@ namespace DesalEra.Unity
         private LocomotionMode _mode = LocomotionMode.OnDeck;
         private Vector3 _velocity;
 
-        private static readonly BuildPiece[] Palette =
+        // When set, movement reads this instead of the keyboard — used by unity-cli
+        // and session replay so scripted input does not fight the player.
+        private bool _driveMove;
+        private float _driveH;
+        private float _driveV;
+        private bool _driveSprint;
+
+        // Last non-zero swim wish. Travel follows this, not the body facing, so a slow
+        // turn cannot push the survivor sideways — and releasing the stick must not keep
+        // applying stroke displacement along a lagging facing vector.
+        private Vector3 _swimHeading = Vector3.forward;
+
+private static readonly BuildPiece[] Palette =
         {
             BuildPiece.Deck(),
             BuildPiece.Column(),
             BuildPiece.Pontoon(),
             BuildPiece.Brace(),
-            BuildPiece.Still()
+            BuildPiece.Still(),
+            BuildPiece.Roof(),
+            BuildPiece.Wall(),
+            BuildPiece.Stairs()
         };
+
+        private int _buildFacing;
+        private int _buildLevel;
+
+        /// <summary>0 = east (+X), 1 = north (+Z), 2 = west (-X), 3 = south (-Z).</summary>
+        public int BuildFacing => _buildFacing;
+
+        /// <summary>Storey the next placement targets (0 = deck level).</summary>
+        public int BuildLevel => _buildLevel;
+
+        /// <summary>True while a roof is overhead. Recomputed every frame.</summary>
+        public bool IsSheltered { get; private set; }
+
+        /// <summary>
+        /// The placeable pieces, for the build bar. Exposed rather than re-declared by the
+        /// UI: two lists of pieces would drift, and the bar's affordability colouring
+        /// would then be describing something the player cannot build.
+        /// </summary>
+        public static IReadOnlyList<BuildPiece> Pieces => Palette;
 
         public BuildPiece SelectedPiece => _selectedPiece;
 
@@ -87,15 +138,41 @@ namespace DesalEra.Unity
         /// <summary>Index into the build palette, for the HUD to highlight.</summary>
         public int SelectedIndex => _selectedIndex;
 
-        public string StatusLine { get; private set; } = string.Empty;
+        /// <summary>Current planar velocity, for diagnostics and session snapshots.</summary>
+        public Vector3 PlanarVelocity => _velocity;
+
+        private string _statusLine = string.Empty;
+
+        /// <summary>
+        /// The one-line feedback message. Raising an event from the setter means the HUD
+        /// does not have to poll it, and none of the eleven places that write a message
+        /// have to remember to also notify anyone.
+        /// </summary>
+        public string StatusLine
+        {
+            get => _statusLine;
+            set
+            {
+                _statusLine = value;
+                StatusChanged?.Invoke(value);
+            }
+        }
+
+        /// <summary>Raised whenever <see cref="StatusLine"/> changes.</summary>
+        public event System.Action<string> StatusChanged;
 
 public void Initialise(GameBootstrap world, ThirdPersonCamera camera)
         {
             _world = world;
             _camera = camera;
             _selectedPiece = Palette[0];
+            _world.StructureNotice += message => StatusLine = message;
 
-            Vector3 spawn = RaftState.WorldOf(Vector2Int.zero) + Vector3.up * 0.6f;
+            // Stand on a perimeter beam, not the empty cell centre — the starter raft is
+            // a frame, and spawning at (0,0) left the survivor hanging over open air.
+            Vector3 spawn = RaftState.WorldOf(Vector2Int.zero);
+            spawn.z = -RaftState.CellSize;
+            spawn.y = SurfaceHeight();
             transform.localPosition = spawn;
 
             foreach (Pickup pickup in FindObjectsOfType<Pickup>()) pickup.RegisterPlayer(transform);
@@ -114,6 +191,108 @@ private void Update()
             // they are on leaves them floating, and a check that only ran while walking
             // would leave them on deck forever.
             UpdateMode(transform.localPosition);
+
+            Vector3 feet = transform.localPosition;
+            feet.y = _surfaceLocalY;
+            IsSheltered = !IsInWater && _world.Raft.IsSheltered(feet);
+            UpdatePreview();
+            _world.PlayerSheltered = IsSheltered;
+        }
+
+        private void LateUpdate()
+        {
+            // RaftMotion writes heave in LateUpdate. Re-plant after that so the soles
+            // cannot lag a frame above the moving deck.
+            if (_world == null || Avatar == null) return;
+            Vector3 p = transform.position;
+            p.y = SurfaceHeight();
+            transform.position = p;
+        }
+
+        /// <summary>Drive movement from CLI / replay. Pass zeros to release control.</summary>
+        public void SetMoveIntent(float h, float v, bool sprint)
+        {
+            _driveH = Mathf.Clamp(h, -1f, 1f);
+            _driveV = Mathf.Clamp(v, -1f, 1f);
+            _driveSprint = sprint;
+            _driveMove = Mathf.Abs(_driveH) > 0.001f || Mathf.Abs(_driveV) > 0.001f || sprint;
+        }
+
+        public string SelectPieceAt(int index)
+        {
+            if (index < 0 || index >= Palette.Length) return "invalid piece index";
+            SelectPiece(index);
+            return StatusLine;
+        }
+
+        public string BuildAt(Vector2Int cell) => BuildAt(cell, _buildLevel, _buildFacing);
+
+        public string BuildAt(Vector2Int cell, int level, int facing)
+        {
+            TryBuildAt(cell, level, facing);
+            return StatusLine;
+        }
+
+        public string DismantleAt(Vector2Int cell) => DismantleAt(cell, _buildLevel);
+
+        public string DismantleAt(Vector2Int cell, int level)
+        {
+            TryDismantleAt(cell, level);
+            return StatusLine;
+        }
+
+        public string SetBuildFacing(int facing)
+        {
+            _buildFacing = RaftState.NormaliseFacing(facing);
+            StatusLine = $"Facing {FacingName(_buildFacing)}.";
+            return StatusLine;
+        }
+
+        public string SetBuildLevel(int level)
+        {
+            _buildLevel = Mathf.Clamp(level, 0, RaftState.MaxLevel);
+            StatusLine = $"Build level {_buildLevel}.";
+            return StatusLine;
+        }
+
+        public static string FacingName(int facing)
+        {
+            switch (RaftState.NormaliseFacing(facing))
+            {
+                case 1: return "north";
+                case 2: return "west";
+                case 3: return "south";
+                default: return "east";
+            }
+        }
+
+        /// <summary>Level a placement actually uses: a roof always goes at least one storey up.</summary>
+        private int EffectiveLevel(BuildPiece piece, int level) =>
+            piece != null && piece.Name == "Roof" ? Mathf.Max(1, level) : level;
+
+        public string EatRationNow()
+        {
+            EatRation();
+            return StatusLine;
+        }
+
+        /// <summary>
+        /// Moves the survivor. The requested height picks the storey: the survivor lands
+        /// on the highest surface within a step of it, so (x, 4.8, z) stands on a first
+        /// floor and (x, 1.5, z) on the deck beneath it.
+        /// </summary>
+        public string TeleportTo(Vector3 world)
+        {
+            transform.position = world;
+            float heave = _world != null && _world.RaftMotion != null ? _world.RaftMotion.HeaveY : 0f;
+            float hint = Mathf.Max(DeckSurfaceLocalY, world.y - heave);
+            UpdateMode(transform.position);
+            _surfaceLocalY = hint;
+            UpdateMode(transform.position);
+            Vector3 p = transform.position;
+            p.y = SurfaceHeight();
+            transform.position = p;
+            return $"teleport ({p.x:F2},{p.y:F2},{p.z:F2})";
         }
 
 private void HandleMovement()
@@ -121,8 +300,17 @@ private void HandleMovement()
             // Camera-relative so the controls follow where the player is looking. The
             // orbit camera supplies a flattened forward, so looking up does not tilt the
             // movement plane into the ground.
-            float h = Input.GetAxisRaw("Horizontal");
-            float v = Input.GetAxisRaw("Vertical");
+            float h = _driveMove ? _driveH : Input.GetAxisRaw("Horizontal");
+            float v = _driveMove ? _driveV : Input.GetAxisRaw("Vertical");
+
+            // Keyboard takes over again as soon as the player steers.
+            if (_driveMove && (Mathf.Abs(Input.GetAxisRaw("Horizontal")) > 0.1f
+                               || Mathf.Abs(Input.GetAxisRaw("Vertical")) > 0.1f))
+            {
+                _driveMove = false;
+                h = Input.GetAxisRaw("Horizontal");
+                v = Input.GetAxisRaw("Vertical");
+            }
 
             Vector3 forward = _camera != null ? _camera.FlatForward : Vector3.forward;
             Vector3 right = _camera != null ? _camera.FlatRight : Vector3.right;
@@ -131,14 +319,16 @@ private void HandleMovement()
             bool hasInput = wish.sqrMagnitude > 0.0001f;
             if (hasInput) wish.Normalize();
 
-            bool swimming = _mode == LocomotionMode.InWater;
+            if (_mode == LocomotionMode.InWater)
+            {
+                HandleSwimMovement(wish, hasInput);
+                return;
+            }
 
             // Sprint is a land skill. Letting the survivor sprint across open water would
             // make swimming a strictly worse deck and there would be no reason to build.
-            bool sprinting = !swimming && Input.GetKey(KeyCode.LeftShift);
-            float targetSpeed = moveSpeed
-                              * (sprinting ? sprintMultiplier : 1f)
-                              * (swimming ? swimSpeedMultiplier : 1f);
+            bool sprinting = _driveMove ? _driveSprint : Input.GetKey(KeyCode.LeftShift);
+            float targetSpeed = moveSpeed * (sprinting ? sprintMultiplier : 1f);
 
             Vector3 targetVelocity = hasInput ? wish * targetSpeed : Vector3.zero;
 
@@ -154,34 +344,130 @@ private void HandleMovement()
 
             Vector3 next = transform.localPosition + _velocity * Time.deltaTime;
             next.y = SurfaceHeight();
+            ClampToSwimRadius(ref next);
 
-            // Confined to the sea. Swimming is unbounded otherwise, and drifting off the
-            // water plane is unrecoverable because nothing brings the survivor back.
-            Vector2 flat = new Vector2(next.x, next.z);
-            if (flat.magnitude > swimRadius)
+            // Face the wish heading while steering; fall back to velocity when coasting
+            // so the body does not keep pointing at a released stick.
+            if (Avatar != null && actualSpeed > 0.15f)
             {
-                flat = flat.normalized * swimRadius;
-                next.x = flat.x;
-                next.z = flat.y;
-                _velocity = Vector3.zero;
+                Vector3 face = hasInput ? wish : _velocity;
+                Avatar.FaceTowards(face);
             }
-
-            // Turn the model towards travel, but only while actually moving: spinning to
-            // face a heading while standing still is a common and distracting tell.
-            if (Avatar != null && actualSpeed > 0.15f) Avatar.FaceTowards(_velocity);
 
             transform.localPosition = next;
         }
 
-/// <summary>
-        /// The height the survivor's feet rest at for the current surface. One place, so
-        /// the moving and standing paths cannot drift apart.
+        /// <summary>
+        /// Swim travel is driven by SwimForward clip progress (synthetic root motion).
+        /// The baked Meshy clips are in-place — shoving the transform with land-style
+        /// acceleration made strokes skate and look stiff.
+        /// </summary>
+        private void HandleSwimMovement(Vector3 wish, bool hasInput)
+        {
+            if (Avatar != null) Avatar.AnchorChestToRoot = true;
+
+            if (hasInput)
+            {
+                _swimHeading = wish;
+                if (Avatar != null)
+                    Avatar.FaceTowards(wish, swimTurnDegreesPerSecond);
+
+                if (Animator != null)
+                {
+                    Animator.Play("SwimForward");
+                    float stick = Mathf.Clamp01(new Vector2(
+                        _driveMove ? _driveH : Input.GetAxisRaw("Horizontal"),
+                        _driveMove ? _driveV : Input.GetAxisRaw("Vertical")).magnitude);
+                    if (stick < 0.01f) stick = 1f;
+                    Animator.SetPlaybackSpeed(Mathf.Lerp(swimPlaybackMin, swimPlaybackMax, stick));
+                }
+            }
+            else if (Animator != null)
+            {
+                // Instant idle: a cross-fade still advanced SwimForward for a beat and
+                // read as a slide/backstep when the stick was released.
+                Animator.Play("SwimIdle", instant: true);
+                Animator.SetPlaybackSpeed(1f);
+            }
+
+            Vector3 animDelta = Vector3.zero;
+            if (hasInput && Animator != null)
+            {
+                animDelta = Animator.ConsumePlanarAnimDelta(_swimHeading);
+                // Hard cap so a clip-time wrap can never shove a full metre in one frame.
+                float maxStep = 3.2f * Time.deltaTime;
+                float mag = animDelta.magnitude;
+                if (mag > maxStep) animDelta *= maxStep / mag;
+            }
+
+            Vector3 next = transform.position + animDelta;
+            next.y = SurfaceHeight();
+            ClampToSwimRadius(ref next);
+
+            Vector3 planar = next - transform.position;
+            planar.y = 0f;
+            _velocity = Time.deltaTime > 1e-6f ? planar / Time.deltaTime : Vector3.zero;
+
+            transform.position = next;
+        }
+
+        private void ClampToSwimRadius(ref Vector3 next)
+        {
+            Vector2 flat = new Vector2(next.x, next.z);
+            if (flat.magnitude <= swimRadius) return;
+
+            flat = flat.normalized * swimRadius;
+            next.x = flat.x;
+            next.z = flat.y;
+            _velocity = Vector3.zero;
+        }
+
+        /// <summary>
+        /// The height of the player root for the current surface. The root sits
+        /// <see cref="PlayerAvatar.RootAboveSoleM"/> above the soles so the mesh
+        /// plants on the deck instead of hovering by a hard-coded eye offset.
         /// </summary>
         private float SurfaceHeight()
         {
-            return _mode == LocomotionMode.InWater
-                ? RaftState.WaterLevelY - SwimEyeDepth
-                : RaftState.BaseDeckY + DeckEyeHeight;
+            float sole = Avatar != null ? Avatar.RootAboveSoleM : DefaultRootAboveSole;
+
+            if (_mode == LocomotionMode.InWater)
+                return SeaWave.HeightAt(transform.position) - SwimRootBelowSurface;
+
+            // Ride the moving deck plane so feet stay planted while the raft heaves.
+            // DeckPlankHalfDepthM lifts soles from the joint centreline onto the plank top.
+            if (_world != null && _world.RaftMotion != null)
+            {
+                Vector3 surface = _world.RaftMotion.SurfacePoint(transform.position, _surfaceLocalY);
+                return surface.y + sole;
+            }
+
+            return _surfaceLocalY + sole;
+        }
+
+        private static float DeckSurfaceLocalY => RaftState.BaseDeckY + DeckPlankHalfDepthM;
+
+        /// <summary>
+        /// Raft-local height of whatever the survivor is standing on: the deck, a floor
+        /// slab or a stair tread. Tracked rather than recomputed from scratch, because
+        /// which surface is underfoot depends on where the survivor came from -- under a
+        /// floor or on top of it.
+        /// </summary>
+        private float _surfaceLocalY = DeckSurfaceLocalY;
+
+        /// <summary>Raft-local height of the surface underfoot, for diagnostics and tests.</summary>
+        public float SurfaceLocalY => _surfaceLocalY;
+
+        /// <summary>Picks the surface underfoot. Returns false when there is none (open water).</summary>
+        private bool ResolveSurface(Vector3 position, out float surfaceY)
+        {
+            bool overDeck = _world.Raft.IsOverDeck(position);
+            float reach = (_mode == LocomotionMode.OnDeck ? _surfaceLocalY : DeckSurfaceLocalY) + RaftState.StepUpM;
+
+            surfaceY = overDeck ? DeckSurfaceLocalY : float.NegativeInfinity;
+            if (_world.Raft.TryGetRaisedSurface(position, reach, out float raised) && raised > surfaceY)
+                surfaceY = raised;
+            return overDeck || !float.IsNegativeInfinity(surfaceY);
         }
 
         /// <summary>
@@ -198,17 +484,22 @@ private void HandleMovement()
             // every frame rather than once.
             if (_world == null || _world.Raft == null) return;
 
-            bool overDeck = _world.Raft.IsOverDeck(position);
+            bool overDeck = ResolveSurface(position, out float surfaceY);
+            _surfaceLocalY = overDeck ? surfaceY : DeckSurfaceLocalY;
 
             if (_mode == LocomotionMode.OnDeck && !overDeck)
             {
                 _mode = LocomotionMode.InWater;
                 StatusLine = "In the water. Swim out to salvage, step back onto the deck to build.";
+                // Snap — cross-fading Run into Swim reads as "still running on the water".
+                if (Animator != null) Animator.Play("SwimIdle", instant: true);
             }
             else if (_mode == LocomotionMode.InWater && overDeck)
             {
                 _mode = LocomotionMode.OnDeck;
                 StatusLine = "Back on deck.";
+                if (Avatar != null) Avatar.AnchorChestToRoot = false;
+                if (Animator != null) Animator.Play("Idle", instant: true);
             }
         }
 
@@ -221,7 +512,9 @@ private void HandleMovement()
         {
             if (_mode == LocomotionMode.InWater)
             {
-                Animator.Play(speed > 0.01f ? "SwimForward" : "SwimIdle");
+                // Slightly higher threshold than land idle so tiny velocity noise after
+                // leaving the deck does not thrash SwimIdle / SwimForward.
+                Animator.Play(speed > 0.2f ? "SwimForward" : "SwimIdle");
                 return;
             }
 
@@ -230,20 +523,77 @@ private void HandleMovement()
 
 private void HandleBuildInput()
         {
+            // A click on a UI panel is not a click on the world. Without this the build bar
+            // and the pack sit on top of the deck, and picking a piece would also place it.
+            if (UnityEngine.EventSystems.EventSystem.current != null &&
+                UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
+            {
+                return;
+            }
+
             // Number keys rather than the wheel. The wheel is worth more as camera zoom,
             // and one meaning per input beats a control that does two unrelated jobs.
             for (int i = 0; i < Palette.Length; i++)
             {
-                if (Input.GetKeyDown(KeyCode.Alpha1 + i)) SelectPiece(i);
+                if (Input.GetKeyDown(KeyCode.Alpha1 + i))
+                    PlayDriver.Select(i);
             }
 
-            if (Input.GetMouseButtonDown(0) && _selectedPiece != null) TryBuild();
+            if (Input.GetKeyDown(KeyCode.R)) PlayDriver.Rotate(_buildFacing + 1);
+            if (Input.GetKeyDown(KeyCode.Q)) PlayDriver.Level((_buildLevel + 1) % (RaftState.MaxLevel + 1));
+
+            if (Input.GetMouseButtonDown(0) && _selectedPiece != null)
+            {
+                int level = EffectiveLevel(_selectedPiece, _buildLevel);
+                Vector2Int cell = CellUnderMouse(level, _selectedPiece.Name == "Roof");
+                PlayDriver.Build(cell.x, cell.y, _selectedIndex, level, _buildFacing);
+            }
 
             // Dismantle shares the right button with look-drag, so the camera decides
             // whether the press was a click.
-            if (_camera != null && _camera.ConsumeLookClick()) TryDismantle();
+            if (_camera != null && _camera.ConsumeLookClick())
+            {
+                Vector2Int cell = CellUnderMouse(_buildLevel, squareCorner: false);
+                PlayDriver.Dismantle(cell.x, cell.y, _buildLevel);
+            }
 
-            if (Input.GetKeyDown(KeyCode.E)) EatRation();
+            if (Input.GetKeyDown(KeyCode.E)) PlayDriver.Eat();
+        }
+
+        /// <summary>Where the selected piece would go under the mouse, or null when not building.</summary>
+        public PlacementPlan PreviewPlan { get; private set; }
+
+        /// <summary>Why the previewed placement would be refused, or null if it would succeed.</summary>
+        public string PreviewProblem { get; private set; }
+
+        /// <summary>When set, the preview targets this grid point instead of the mouse. For CLI screenshots.</summary>
+        public Vector2Int? PreviewCellOverride { get; set; }
+
+        private void UpdatePreview()
+        {
+            PreviewPlan = null;
+            PreviewProblem = null;
+            if (IsInWater || _selectedPiece == null) return;
+
+            int level = EffectiveLevel(_selectedPiece, _buildLevel);
+            Vector2Int cell;
+            if (PreviewCellOverride.HasValue)
+            {
+                cell = PreviewCellOverride.Value;
+            }
+            else
+            {
+                if (Camera.main == null) return;
+                if (UnityEngine.EventSystems.EventSystem.current != null &&
+                    UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+
+                Vector3 mouse = Input.mousePosition;
+                if (mouse.x < 0f || mouse.y < 0f || mouse.x > Screen.width || mouse.y > Screen.height) return;
+                cell = CellUnderMouse(level, _selectedPiece.Name == "Roof");
+            }
+
+            PreviewProblem = _world.Raft.CanPlace(_selectedPiece, cell, level, _buildFacing, out PlacementPlan plan);
+            PreviewPlan = plan;
         }
 
         private void SelectPiece(int index)
@@ -254,7 +604,7 @@ private void HandleBuildInput()
             StatusLine = $"Selected {_selectedPiece.Name}.";
         }
 
-        private void TryBuild()
+        private void TryBuildAt(Vector2Int cell, int level, int facing)
         {
             // Placing a deck thirty metres away while floating next to it is not building,
             // it is remote construction. Requiring the survivor to be on deck also keeps
@@ -266,19 +616,13 @@ private void HandleBuildInput()
                 return;
             }
 
-            Vector2Int cell = DeckCellUnderMouse();
-            if (_world.Raft.IsCellOccupied(new Vector2Int(0, 0)) && cell == Vector2Int.zero)
-            {
-                StatusLine = "That is the spawn deck.";
-                return;
-            }
-
-            string error = _world.Raft.TryPlace(_selectedPiece, cell);
+            level = EffectiveLevel(_selectedPiece, level);
+            string error = _world.Raft.TryPlace(_selectedPiece, cell, level, facing);
             StatusLine = error ?? $"Built {_selectedPiece.Name} at {cell.x},{cell.y}.";
             _world.Reanalyse();
         }
 
-        private void TryDismantle()
+        private void TryDismantleAt(Vector2Int cell, int level)
         {
             if (IsInWater)
             {
@@ -286,9 +630,11 @@ private void HandleBuildInput()
                 return;
             }
 
-            Vector2Int cell = DeckCellUnderMouse();
-            string error = _world.Raft.TryDismantle(cell);
-            StatusLine = error ?? $"Dismantled at {cell.x},{cell.y}.";
+            string error = _world.Raft.TryDismantle(cell, level);
+            int fallen = error == null ? _world.Raft.LastCollapsed : 0;
+            StatusLine = error ?? (fallen > 0
+                ? $"Dismantled at {cell.x},{cell.y}. {fallen} pieces collapsed."
+                : $"Dismantled at {cell.x},{cell.y}.");
             _world.Reanalyse();
         }
 
@@ -305,21 +651,29 @@ private void HandleBuildInput()
         }
 
         /// <summary>
-        /// Which deck cell the mouse is over, by intersecting the mouse ray with the
-        /// deck plane. Cheaper and more reliable than raycasting against every
-        /// member, and it keeps placement aligned to the build grid.
+        /// Which grid point the mouse is over, by intersecting the mouse ray with the
+        /// plane of the target storey. Cheaper and more reliable than raycasting against
+        /// every member, and it keeps placement aligned to the build grid. A roof keys
+        /// off its square, so it takes the square's south-west corner instead of the
+        /// nearest point.
         /// </summary>
-private Vector2Int DeckCellUnderMouse()
+        private Vector2Int CellUnderMouse(int level, bool squareCorner)
         {
             Camera camera = Camera.main;
             if (camera == null) return Vector2Int.zero;
 
             Ray ray = camera.ScreenPointToRay(Input.mousePosition);
-            var plane = new Plane(Vector3.up, new Vector3(0f, RaftState.BaseDeckY, 0f));
+            var plane = new Plane(Vector3.up, RaftState.WorldOf(Vector2Int.zero, level));
 
             if (!plane.Raycast(ray, out float distance)) return Vector2Int.zero;
 
             Vector3 point = ray.GetPoint(distance);
+            if (squareCorner)
+            {
+                return new Vector2Int(
+                    Mathf.FloorToInt(point.x / RaftState.CellSize),
+                    Mathf.FloorToInt(point.z / RaftState.CellSize));
+            }
             return new Vector2Int(
                 Mathf.RoundToInt(point.x / RaftState.CellSize),
                 Mathf.RoundToInt(point.z / RaftState.CellSize));

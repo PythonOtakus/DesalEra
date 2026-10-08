@@ -3,7 +3,8 @@
   "rootNamespace": "DesalEra.EditorTools",
   "references": [
     "DesalEra.Core",
-    "DesalEra.Unity"
+    "DesalEra.Unity",
+    "UnityCliConnector.Editor"
   ],
   "includePlatforms": [
     "Editor"

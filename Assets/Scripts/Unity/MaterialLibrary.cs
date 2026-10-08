@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 
 namespace DesalEra.Unity
 {
@@ -24,25 +25,59 @@ namespace DesalEra.Unity
         public struct Palette
         {
             public string Key;
+            /// <summary>Albedo. Normal and roughness are derived from this name.</summary>
             public string FileName;
             public Color Fallback;
             public float TilingMetres;
             public float Smoothness;
+            public float NormalStrength;
+            public float Metallic;
         }
 
         /// <summary>
         /// The five surfaces the greybox needs. Each is CC0 from ambientCG, chosen for
         /// the flooded-industrial read the design calls for: rusted steel, weathered
         /// decking, old timber, poured concrete, and peeling plaster.
+        ///
+        /// Every surface is a full ambientCG PBR set, not just an albedo: an earlier
+        /// pass shipped the preview sphere renders that sit alongside the real maps in
+        /// the same zip, so the whole raft was lit by a photograph of a ball. The
+        /// channels are looked up by name from the albedo, see <see cref="Channel"/>.
         /// </summary>
         private static readonly Palette[] Defaults =
         {
-            new Palette { Key = "rust",    FileName = "rust_Metal063.jpg",      Fallback = new Color(0.42f, 0.26f, 0.18f), TilingMetres = 2f, Smoothness = 0.35f },
-            new Palette { Key = "deck",    FileName = "woodfloor_WoodFloor064.jpg", Fallback = new Color(0.45f, 0.36f, 0.24f), TilingMetres = 2f, Smoothness = 0.18f },
-            new Palette { Key = "timber",  FileName = "wood_Wood035.jpg",        Fallback = new Color(0.38f, 0.30f, 0.21f), TilingMetres = 2f, Smoothness = 0.16f },
-            new Palette { Key = "concrete",FileName = "concrete_Concrete034.jpg", Fallback = new Color(0.48f, 0.47f, 0.45f), TilingMetres = 3f, Smoothness = 0.12f },
-            new Palette { Key = "plaster", FileName = "plaster_Plaster001.jpg",  Fallback = new Color(0.55f, 0.53f, 0.48f), TilingMetres = 3f, Smoothness = 0.14f }
+            new Palette { Key = "rust",    FileName = "rust_Metal063.jpg",      Fallback = new Color(0.42f, 0.26f, 0.18f), TilingMetres = 1.4f, Smoothness = 0.42f, NormalStrength = 1.35f, Metallic = 0.62f },
+            new Palette { Key = "deck",    FileName = "woodfloor_WoodFloor064.jpg", Fallback = new Color(0.45f, 0.36f, 0.24f), TilingMetres = 1.5f, Smoothness = 0.22f, NormalStrength = 1.2f, Metallic = 0f },
+            new Palette { Key = "timber",  FileName = "wood_Wood035.jpg",        Fallback = new Color(0.38f, 0.30f, 0.21f), TilingMetres = 1.4f, Smoothness = 0.20f, NormalStrength = 1.4f, Metallic = 0f },
+            new Palette { Key = "concrete",FileName = "concrete_Concrete034.jpg", Fallback = new Color(0.48f, 0.47f, 0.45f), TilingMetres = 2.2f, Smoothness = 0.16f, NormalStrength = 1.15f, Metallic = 0f },
+            new Palette { Key = "plaster", FileName = "plaster_Plaster001.jpg",  Fallback = new Color(0.55f, 0.53f, 0.48f), TilingMetres = 2.4f, Smoothness = 0.18f, NormalStrength = 0.9f, Metallic = 0f }
         };
+
+        /// <summary>
+        /// ambientCG's NormalGL is the OpenGL-convention tangent-space normal map, which
+        /// is what Unity expects. The DirectX variant in the same pack has the green
+        /// channel inverted, and picking it by mistake produces lighting that looks
+        /// embossed rather than recessed.
+        /// </summary>
+        private const string NormalChannel = "NormalGL";
+
+        /// <summary>
+        /// Derives a sibling map's file name from the albedo name, so adding a surface is
+        /// one table row rather than three file names that can drift apart.
+        /// "rust_Metal063.jpg" plus "Roughness" gives "rust_Metal063_Roughness.jpg".
+        /// The extension is copied from the albedo rather than assumed, because the
+        /// lookup is by name: an asset kept as png has png siblings, and silently
+        /// searching for a jpg instead just reads as a missing file.
+        /// </summary>
+        public static string Channel(string albedoFileName, string channel)
+        {
+            if (string.IsNullOrEmpty(albedoFileName)) return null;
+
+            int dot = albedoFileName.LastIndexOf('.');
+            if (dot <= 0) return albedoFileName + "_" + channel + ".jpg";
+
+            return albedoFileName.Substring(0, dot) + "_" + channel + albedoFileName.Substring(dot);
+        }
 
         /// <summary>
         /// The survivor's own material, built from the generated 2K PBR set rather than
@@ -78,25 +113,50 @@ namespace DesalEra.Unity
             {
                 normal.wrapMode = TextureWrapMode.Repeat;
                 normal.filterMode = FilterMode.Bilinear;
-                _textures["Survivor_Normal"] = normal;
             }
 
             return material;
         }
 
-        private static void SetMap(Material material, Texture2D texture, string primary, string fallback)
+        private static bool SetMap(Material material, Texture2D texture, string primary, string fallback)
         {
-            if (material.HasProperty(primary)) material.SetTexture(primary, texture);
-            else if (material.HasProperty(fallback)) material.SetTexture(fallback, texture);
+            if (material.HasProperty(primary))
+            {
+                material.SetTexture(primary, texture);
+                return true;
+            }
+
+            if (!string.IsNullOrEmpty(fallback) && material.HasProperty(fallback))
+            {
+                material.SetTexture(fallback, texture);
+                return true;
+            }
+
+            return false;
         }
 
         private readonly Dictionary<string, Material> _materials = new Dictionary<string, Material>();
         private readonly Dictionary<string, Texture2D> _textures = new Dictionary<string, Texture2D>();
 
+        /// <summary>
+        /// Textures decoded from disk at runtime. These are ours to destroy; the ones
+        /// from Resources are not, and Unity refuses to destroy imported assets.
+        /// </summary>
+        private readonly List<Texture2D> _owned = new List<Texture2D>();
+
         /// <summary>Files that were expected but could not be loaded, for the HUD.</summary>
         public readonly List<string> MissingTextures = new List<string>();
 
         private void Awake()
+        {
+            Rebuild();
+        }
+
+        /// <summary>
+        /// Loads every surface. Public so a test can drive it without a play-mode Awake,
+        /// which EditMode tests do not get.
+        /// </summary>
+        public void Rebuild()
         {
             BuildAll();
         }
@@ -114,6 +174,15 @@ namespace DesalEra.Unity
             }
 
             if (_fallback != null) SafeDestroy(_fallback);
+
+            foreach (Texture2D texture in _owned)
+            {
+                if (texture != null) SafeDestroy(texture);
+            }
+
+            _owned.Clear();
+            _textures.Clear();
+            _materials.Clear();
         }
 
         private void BuildAll()
@@ -124,9 +193,8 @@ namespace DesalEra.Unity
 
         private Material Build(Palette palette)
         {
-            Texture2D texture = LoadTexture(palette.FileName);
+            Texture2D texture = LoadTexture(palette.FileName, linear: false);
             if (texture == null) MissingTextures.Add(palette.FileName);
-            else _textures[palette.FileName] = texture;
 
             var material = new Material(FindShader()) { name = $"Mat_{palette.Key}" };
 
@@ -139,12 +207,113 @@ namespace DesalEra.Unity
                 material.SetTexture("_BaseMap", texture);
             }
 
-            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", palette.Fallback);
-            if (material.HasProperty("_Color")) material.color = palette.Fallback;
+            if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", Color.white);
+            if (material.HasProperty("_Color")) material.color = Color.white;
             if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", palette.Smoothness);
             if (material.HasProperty("_Glossiness")) material.SetFloat("_Glossiness", palette.Smoothness);
+            if (material.HasProperty("_Metallic")) material.SetFloat("_Metallic", palette.Metallic);
+
+            ApplyNormalMap(material, palette);
+            ApplySmoothnessMap(material, palette);
 
             return material;
+        }
+
+        /// <summary>
+        /// Loads the tangent-space normal map and scales it by the palette's strength.
+        /// </summary>
+        private void ApplyNormalMap(Material material, Palette palette)
+        {
+            string fileName = Channel(palette.FileName, NormalChannel);
+            Texture2D normal = LoadTexture(fileName, linear: true);
+            if (normal == null)
+            {
+                MissingTextures.Add(fileName);
+                return;
+            }
+
+            SetMap(material, normal, "_BumpMap", "_NormalMap");
+            if (material.HasProperty("_BumpScale")) material.SetFloat("_BumpScale", palette.NormalStrength);
+            if (material.HasProperty("_NormalScale")) material.SetFloat("_NormalScale", palette.NormalStrength);
+        }
+
+        /// <summary>
+        /// Feeds roughness into the shader's smoothness slot.
+        ///
+        /// Both the built-in Standard shader and URP/Lit read smoothness from the
+        /// *alpha* channel of the gloss map, and invert it: alpha 1 is mirror-smooth.
+        /// A grayscale roughness jpg has alpha 1 everywhere, so handing it over
+        /// unchanged renders every surface as polished chrome. The map is therefore
+        /// repacked on load into white RGB with 1 - roughness in alpha, which is the
+        /// layout both shaders already expect.
+        /// </summary>
+        private void ApplySmoothnessMap(Material material, Palette palette)
+        {
+            string fileName = Channel(palette.FileName, "Roughness");
+            Texture2D roughness = LoadTexture(fileName, linear: true);
+            if (roughness == null)
+            {
+                MissingTextures.Add(fileName);
+                return;
+            }
+
+            Texture2D packed = PackSmoothnessIntoAlpha(roughness);
+            if (packed == null) return;
+
+            if (!SetMap(material, packed, "_GlossinessMap", "_SmoothnessMap") &&
+                !SetMap(material, packed, "_MetallicGlossMap", "_MetallicGlossMap"))
+            {
+                // No slot for it on this shader: drop the packed copy rather than leak
+                // a texture nothing samples.
+                SafeDestroy(packed);
+                return;
+            }
+
+            _owned.Add(packed);
+
+            // The scalar stays meaningful: the shader multiplies it by the map's alpha,
+            // so it reads as "how glossy this surface is allowed to get".
+            if (material.HasProperty("_Glossiness")) material.SetFloat("_Glossiness", palette.Smoothness);
+            if (material.HasProperty("_Smoothness")) material.SetFloat("_Smoothness", palette.Smoothness);
+        }
+
+        /// <summary>
+        /// Converts a roughness texture to the gloss map layout: white in RGB so the
+        /// specular colour is neutral, and 1 - roughness in alpha. Read straight off the
+        /// source texels, so the source must be loaded linear (see
+        /// <see cref="LoadTexture"/>).
+        /// </summary>
+        private static Texture2D PackSmoothnessIntoAlpha(Texture2D roughness)
+        {
+            if (roughness.width < 2 || roughness.height < 2) return null;
+
+            Color32[] pixels;
+            try
+            {
+                pixels = roughness.GetPixels32();
+            }
+            catch (System.Exception)
+            {
+                // Unreadable source, so there is nothing to repack.
+                return null;
+            }
+
+            for (int i = 0; i < pixels.Length; i++)
+            {
+                pixels[i] = new Color32(255, 255, 255, (byte)(255 - pixels[i].r));
+            }
+
+            var packed = new Texture2D(roughness.width, roughness.height, TextureFormat.RGBA32, true, linear: true)
+            {
+                name = roughness.name + "_gloss",
+                wrapMode = roughness.wrapMode,
+                filterMode = roughness.filterMode,
+                anisoLevel = roughness.anisoLevel
+            };
+
+            packed.SetPixels32(pixels);
+            packed.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+            return packed;
         }
 
         private static Shader FindShader()
@@ -157,8 +326,19 @@ namespace DesalEra.Unity
                    ?? Shader.Find("Unlit/Texture");
         }
 
-        private Texture2D LoadTexture(string fileName)
+        /// <summary>
+        /// Decodes a jpg from StreamingAssets into a texture.
+        ///
+        /// <paramref name="linear"/> matters and is not cosmetic. A normal map stores a
+        /// direction, not a colour: sampled through an sRGB decode its blue channel is
+        /// brightened, which tilts every normal off vertical and turns dents into
+        /// bumps. Roughness has the same problem. Albedo is the one channel that must
+        /// stay sRGB.
+        /// </summary>
+        private Texture2D LoadTexture(string fileName, bool linear)
         {
+            if (string.IsNullOrEmpty(fileName)) return null;
+
             string root = Path.Combine(Application.streamingAssetsPath, TextureFolder);
             string full = Path.Combine(root, fileName);
             if (!File.Exists(full)) return null;
@@ -166,7 +346,7 @@ namespace DesalEra.Unity
             try
             {
                 byte[] bytes = File.ReadAllBytes(full);
-                var texture = new Texture2D(2, 2, TextureFormat.RGB24, true);
+                var texture = new Texture2D(2, 2, TextureFormat.RGB24, true, linear);
                 texture.name = fileName;
 
                 // LoadImage is the one path that works without an image library and
@@ -176,7 +356,51 @@ namespace DesalEra.Unity
                 texture.wrapMode = TextureWrapMode.Repeat;
                 texture.filterMode = FilterMode.Bilinear;
                 texture.anisoLevel = 4;
+
+                // LoadImage is allowed to reformat the texture, and it does not promise
+                // to keep the linear flag, so the result is checked rather than assumed.
+                // This is the one thing in here that must not be left to faith.
+                if (GraphicsFormatUtility.IsSRGBFormat(texture.graphicsFormat) == linear)
+                {
+                    Texture2D rebuilt = Rebake(texture, linear);
+                    if (rebuilt != null)
+                    {
+                        SafeDestroy(texture);
+                        texture = rebuilt;
+                    }
+                }
+
+                _textures[fileName] = texture;
+                _owned.Add(texture);
                 return texture;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Rebuilds a texture through its texel array to guarantee the colour space,
+        /// for the case where LoadImage discarded the constructor's linear flag.
+        /// </summary>
+        private static Texture2D Rebake(Texture2D source, bool linear)
+        {
+            try
+            {
+                Color32[] pixels = source.GetPixels32();
+                var rebuilt = new Texture2D(source.width, source.height,
+                                             TextureFormat.RGBA32, true, linear)
+                {
+                    name = source.name,
+                    wrapMode = source.wrapMode,
+                    filterMode = source.filterMode,
+                    anisoLevel = source.anisoLevel
+                };
+
+                rebuilt.SetPixels32(pixels);
+                rebuilt.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+                return rebuilt;
             }
             catch (Exception)
             {
@@ -189,6 +413,21 @@ namespace DesalEra.Unity
         {
             if (_materials.TryGetValue(key, out Material material) && material != null) return material;
             return FallbackMaterial();
+        }
+
+        /// <summary>
+        /// How many metres one tile of the texture should cover. Read by the caller so the
+        /// mesh UVs can be laid out at the same physical scale the texture was authored
+        /// for; the material itself keeps tiling at 1,1.
+        /// </summary>
+        public float TilingMetresFor(string key)
+        {
+            foreach (Palette palette in Defaults)
+            {
+                if (palette.Key == key) return Mathf.Max(palette.TilingMetres, 0.01f);
+            }
+
+            return 2f;
         }
 
         private Material _fallback;

@@ -1,8 +1,53 @@
 ﻿# 项目进度
 
-> 最后更新：2026-10-02
+> 最后更新：2026-10-07
 >
 > 本文档记录"已经发生了什么"。待做的事见 `plan.md`。
+
+## 庇护所建造第二阶段（2026-10-07）
+
+设计见 `docs/shelter-building.md`「第二阶段」。已完成：
+
+- 新构件：墙（7，两端立柱，对角杆当剪力撑，受风 9 m²）、楼梯（8，爬一层，6 级踏板渲染）；屋顶兼上一层楼板
+- 支撑改为“接地”判定：从甲板高度节点与龙骨锚点沿存活杆件可达，判定时排除构件自身杆件；墙要求两端各有一根存活竖杆
+- 坍塌连锁 `RaftState.CollapseUnsupported`：拆除后和每次结构分析后执行，杆件全断或失去支撑的构件移除、不退款，插槽可重建
+- 风载：`Member.WindAreaM2 / WindNormal`，`TrussSolver.ApplyWind` 按面积与迎风角加载，仍幂等
+- 角色在楼板 / 楼梯上行走：`RaftState.TryGetRaisedSurface` + `PlayerController.SurfaceLocalY`，单步可上 0.6 m，从楼板下方走过不被抬起
+- 放置预览：`RaftState.CanPlace` 拆出校验（返回 `PlacementPlan` 几何），`BuildPreview` 绿 / 红虚影，建造栏标题显示层、朝向与原因
+- 风暴开始 / 结束立即 `Reanalyse`；`GameBootstrap.SetStorm`；`StructureNotice` 事件把坍塌提示推到状态条
+- CLI：`house_demo`、`world_storm`、`player_preview`；快照新增 `surfaceY`，`soleGap` 改为相对实际站立面
+- 修复（实现中发现，均为既有问题）：
+  - `TrussSolver.AssembleMember` 刚度随杆件朝向变化（屋顶两根对角线一根双倍、一根为零），改为与朝向无关的 `EA/L × (aaᵀ + t(I−aaᵀ))`，沿轴杆件结果不变
+  - 立柱落在 6 m 起始梁中点时柱脚是孤立节点：新建节点落在杆件中段时拆分该杆件
+  - 风暴周期：结束时间按“下一场开始 + 12 s”算，导致风暴常驻；改为独立的 `stormDurationSeconds`
+  - 建造栏高亮只在库存变化时刷新，快捷键 / CLI 选件后高亮不跟随
+- 测试：新增 `HouseTests` 21 项；两项旧测试改到甲板角点（避免拆梁改变杆件数）；EditMode 153 项全过
+- Play 验证：`house_demo` 沿楼梯上楼（站立面 2.02 → 4.24 → 4.72，上层屋顶下 `sheltered=true`）；预览绿 / 红虚影；`world_storm` 后楼梯与两面侧墙坍塌、迎风墙保留，暴露角色掉 12 生命，12 s 后风暴结束
+
+## 庇护所建造第一阶段（2026-10-07）
+
+设计见 `docs/shelter-building.md`，计划项 P1-5。已完成：
+
+- 占用表改为 `(格点, 层, 插槽)`（`PlacementKey`），立柱与甲板可共享格点；西 / 南向甲板归一到相邻格点，同一根梁不会放两次
+- 建造层 0–2（`StoreyHeightM = 3 m`），1 层起必须有“仍有构件连接”的节点支撑——拆掉的立柱留下的孤立节点不算
+- 朝向：`R` 旋转、`Q` 切层；`RaftState.RotateOffset` 只转水平分量
+- 新构件“屋顶”：四角立柱支撑，结构上是屋面内两根交叉对角杆，渲染为平板（`GameBootstrap.BuildRoofSlab`）
+- 遮蔽判定 `RaftState.IsSheltered` → `GameBootstrap.PlayerSheltered` → 状态条“有遮蔽”、风暴文字“已遮蔽 / 暴露中”
+- `SurvivalModel.ApplyWeather`：风暴暴露掉体力 / 生命，遮蔽下免除；平时遮蔽下体力恢复 ×1.5
+- 录制 / CLI：动作记录 `level` / `facing`，新动作 `rotate` / `level`；快照新增 `sheltered` / `storm` / `buildLevel` / `buildFacing`；新增 `player_rotate`、`player_level`、`shelter_demo`
+- 顺带修复：状态条标签文字被截断不可见（`UiFactory.Text` 默认只占上半格）
+- 测试：`ShelterTests` 15 项全过
+- 随后修复 `MaterialTests` 4 项：测试改为按“每个面独立顶点、UV 以米计”断言新网格；同时修正 `MeshFactory.Extrude` 的绕序（侧面与端盖原先朝内，网格内外翻转），并对顺时针轮廓自动反向。EditMode 131 项全过
+
+## 海水与庇护所（2026-10-07）
+
+设计见 `docs/sea-shelter.md`。进行中：
+
+- 海面：Gerstner 涌浪 + 高度场法线 + 菲涅尔天空全景反射（`SeaWater.shader` / `SeaWave`）
+- 打捞物跟浪起伏与轻倾侧（`Pickup`）
+- 龙骨吃水 **0.6 m → 1.5 m**（`RaftState.KeelDepthM`）；开局筏仍漂浮
+- `RaftMotion`：四角采样涌浪 → heave + 轻 pitch/roll；甲板玩家跟随
+- 文档：`docs/sea-shelter.md`，计划项 P0-3
 
 ## 当前状态
 

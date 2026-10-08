@@ -190,14 +190,34 @@ namespace DesalEra.Structure
                 ? Vector3.right
                 : WindDirection.normalized;
 
+            var applied = new Vector3[_joints.Count];
             for (int i = 0; i < _joints.Count; i++)
             {
                 float height = Mathf.Max(0f, _joints[i].Position.y);
-                Vector3 applied = dir * (WindLoadKnPerM * height);
-                _externalForcesKn[i] += applied;
-                _lastWindVector.Add(applied);
+                applied[i] = dir * (WindLoadKnPerM * height);
+            }
+
+            // Cladding catches wind over its whole face, split between the member's ends.
+            // Pressure is the per-metre load spread over one grid bay.
+            float pressureKnPerM2 = WindLoadKnPerM / PanelBayWidthM;
+            foreach (Member m in _members)
+            {
+                if (m.IsFailed || m.WindAreaM2 <= 0f) continue;
+                float facing = Mathf.Abs(Vector3.Dot(m.WindNormal, dir));
+                Vector3 half = dir * (pressureKnPerM2 * m.WindAreaM2 * facing * 0.5f);
+                applied[m.JointA] += half;
+                applied[m.JointB] += half;
+            }
+
+            for (int i = 0; i < _joints.Count; i++)
+            {
+                _externalForcesKn[i] += applied[i];
+                _lastWindVector.Add(applied[i]);
             }
         }
+
+        /// <summary>Width of frame that one metre of <see cref="WindLoadKnPerM"/> is spread over.</summary>
+        public const float PanelBayWidthM = 3f;
 
         /// <summary>
         /// Assembles K, solves for displacement, then recovers axial forces.
@@ -305,42 +325,37 @@ namespace DesalEra.Structure
             if (ea <= 0.0 || m.LengthM <= 1e-6f) return;
 
             double scale = ea / m.LengthM;
-            double cx = m.Axis.x, cy = m.Axis.y, cz = m.Axis.z;
+            double[] axis = { m.Axis.x, m.Axis.y, m.Axis.z };
 
             int a = m.JointA * 3;
             int b = m.JointB * 3;
 
-            // Direction cosine matrix d, with d[axis][axis] along the member and the
-            // remaining two rows holding the off-axis directions.
-            var d = new double[3, 3];
-            d[0, 0] = cx; d[0, 1] = cy; d[0, 2] = cz;
-
-            Vector3 helper = Math.Abs(cy) < 0.9 ? Vector3.up : Vector3.right;
-            Vector3 t1 = (helper - m.Axis * Vector3.Dot(helper, m.Axis)).normalized;
-            Vector3 t2 = Vector3.Cross(m.Axis, t1);
-            d[1, 0] = t1.x; d[1, 1] = t1.y; d[1, 2] = t1.z;
-            d[2, 0] = t2.x; d[2, 1] = t2.y; d[2, 2] = t2.z;
-
-            for (int i = 0; i < 3; i++)
+            // k = EA/L * (a a^T + t (I - a a^T)): full stiffness along the member plus a
+            // transverse share standing in for joint fixity, which a pin-jointed truss
+            // cannot otherwise represent and without which a plain portal frame is a
+            // mechanism. The earlier assembly weighted each direction by the squared
+            // sum of its cosines, so a diagonal's stiffness depended on which way it
+            // leaned -- one roof diagonal got double, the other none.
+            double t = TransverseStiffnessFraction;
+            for (int p = 0; p < 3; p++)
             {
-                for (int jx = 0; jx < 3; jx++)
+                for (int q = 0; q < 3; q++)
                 {
-                    for (int p = 0; p < 3; p++)
-                    {
-                        for (int q = 0; q < 3; q++)
-                        {
-                            double term = scale * d[0, i] * d[0, jx] * d[p, 0] * d[q, 0]
-                                          + scale * d[1, i] * d[1, jx] * d[p, 1] * d[q, 1]
-                                          + scale * d[2, i] * d[2, jx] * d[p, 2] * d[q, 2];
-                            k[a + p, a + q] += term;
-                            k[a + p, b + q] -= term;
-                            k[b + p, a + q] -= term;
-                            k[b + p, b + q] += term;
-                        }
-                    }
+                    double term = scale * ((1.0 - t) * axis[p] * axis[q] + (p == q ? t : 0.0));
+                    k[a + p, a + q] += term;
+                    k[a + p, b + q] -= term;
+                    k[b + p, a + q] -= term;
+                    k[b + p, b + q] += term;
                 }
             }
         }
+
+        /// <summary>
+        /// Transverse stiffness of a member as a fraction of its axial stiffness. 1 makes
+        /// every member an isotropic spring, which is what axis-aligned members always
+        /// had; the bracing tests are calibrated against it.
+        /// </summary>
+        public const double TransverseStiffnessFraction = 1.0;
 
         /// <summary>
         /// Axial force from the relative displacement of the two ends: a member

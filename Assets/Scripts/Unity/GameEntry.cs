@@ -1,4 +1,7 @@
-﻿using UnityEngine;
+﻿using System.IO;
+using DesalEra.Unity.Session;
+using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace DesalEra.Unity
 {
@@ -16,12 +19,16 @@ namespace DesalEra.Unity
         [SerializeField] private float cameraFieldOfView = 60f;
 
         [Header("Lighting")]
-        [SerializeField] private Vector3 lightDirection = new Vector3(0.4f, -0.8f, 0.45f);
-        [SerializeField] private Color skyColour = new Color(0.42f, 0.48f, 0.52f);
-        [SerializeField] private Color fogColour = new Color(0.36f, 0.42f, 0.46f);
-        [SerializeField] private float fogDensity = 0.018f;
+        [SerializeField] private Vector3 lightDirection = new Vector3(0.55f, -0.75f, 0.35f);
+        [SerializeField] private Color skyColour = new Color(0.55f, 0.62f, 0.68f);
+        [SerializeField] private Color fogColour = new Color(0.64f, 0.68f, 0.72f);
+        [SerializeField] private float fogDensity = 0.024f;
+        [SerializeField] private string skyboxFile = "sky/sky_DaySkyHDRI070B.jpg";
 
         private ThirdPersonCamera _orbit;
+        private GameBootstrap _world;
+        private PlayerController _player;
+        private Ui.UiRoot _ui;
 
         private void Awake()
         {
@@ -29,38 +36,104 @@ namespace DesalEra.Unity
 
             BuildWorld();
             BuildLighting();
+            BuildUi();
         }
 
-        private void BuildWorld()
+        /// <summary>
+        /// The interface, built after the world so it can read live state from it.
+        ///
+        /// It is a component rather than a scene object for the same reason everything else
+        /// is: a canvas hierarchy saved into the scene would be a few hundred lines of
+        /// unreviewable YAML, in the one file this project refuses to hand-edit.
+        /// </summary>
+        private void BuildUi()
+        {
+            var uiGo = new GameObject("Ui");
+            uiGo.transform.SetParent(transform, worldPositionStays: false);
+
+            _ui = uiGo.AddComponent<Ui.UiRoot>();
+            _ui.Initialise();
+
+            var ui = _ui;
+            var world = _world;
+            var player = _player;
+
+            Ui.InventoryView pack = ui.Screen("pack", () => Ui.InventoryView.Create(ui.Overlay));
+            Ui.MaterialPickerView picker = ui.Screen("materials", () => Ui.MaterialPickerView.Create(ui.Overlay));
+
+            pack.Bind(world.Raft.Inventory, PlayerController.Pieces);
+
+            ui.BuildBar.Bind(PlayerController.Pieces);
+            ui.BuildBar.PieceChosen += piece =>
+            {
+                picker.Open(piece, world.Raft.Inventory);
+                ui.ShowOnly("materials");
+            };
+
+            ui.Status.Declare("sheltered", "有遮蔽", Ui.UiTheme.Accent);
+            ui.Status.Declare("storm", "风暴", Ui.UiTheme.Warn);
+
+            // Selecting a piece reports through the status line, so this also keeps the
+            // dock's highlight on the piece the hotkeys or CLI just picked.
+            player.StatusChanged += message =>
+            {
+                ui.Notice.Show(Ui.UiCopy.Notice(message), Ui.UiTheme.TextPrimary);
+                ui.BuildBar.Refresh(world.Raft.Inventory, player.SelectedPiece);
+            };
+
+            world.Raft.Inventory.Changed += (_, __) =>
+            {
+                ui.BuildBar.Refresh(world.Raft.Inventory, player.SelectedPiece);
+                pack.Refresh();
+            };
+
+            ui.BuildBar.Refresh(world.Raft.Inventory, player.SelectedPiece);
+            pack.Refresh();
+
+            // The per-frame part of the HUD lives in its own component so this method stays
+            // about wiring rather than about what happens sixty times a second.
+            uiGo.AddComponent<Ui.HudPresenter>().Initialise(ui, world, player);
+        }
+
+private void BuildWorld()
         {
             var world = new GameObject("World");
-            GameBootstrap bootstrap = world.AddComponent<GameBootstrap>();
+            _world = world.AddComponent<GameBootstrap>();
 
             var playerGo = new GameObject("Player");
-            playerGo.transform.SetParent(world.transform, worldPositionStays: false);
+            playerGo.transform.SetParent(_world.transform, worldPositionStays: false);
 
-            var player = playerGo.AddComponent<PlayerController>();
+            _player = playerGo.AddComponent<PlayerController>();
             var avatar = playerGo.AddComponent<PlayerAvatar>();
             var animator = playerGo.AddComponent<PlayerAnimator>();
 
             // The camera must exist before the player initialises, because movement is
-            // camera-relative and would otherwise fall back to a fixed world axis on
-            // the first frame.
+            // camera-relative and would otherwise fall back to a fixed world axis on the
+            // first frame.
             Camera camera = CreateCamera();
-            _orbit = world.AddComponent<ThirdPersonCamera>();
+            _orbit = _world.gameObject.AddComponent<ThirdPersonCamera>();
 
-            player.Initialise(bootstrap, _orbit);
+            // Avatar + idle pose before spawn height: SurfaceHeight uses RootAboveSoleM,
+            // which is only meaningful once the skinned idle bounds are available.
             avatar.Initialise(playerGo.transform);
             animator.Initialise();
-            player.Avatar = avatar;
-            player.Animator = animator;
+            avatar.RecalculateSoleOffset();
+            _player.Avatar = avatar;
+            _player.Animator = animator;
+            _player.Initialise(_world, _orbit);
+            _world.gameObject.AddComponent<BuildPreview>().Initialise(_world, _player);
 
             _orbit.Initialise(playerGo.transform, camera);
 
-            var hud = world.AddComponent<HudController>();
-            hud.Initialise(bootstrap, player);
+            // Session recorder lives on the world root so menu / CLI can always find it.
+            if (_world.GetComponent<PlaySessionRecorder>() == null)
+                _world.gameObject.AddComponent<PlaySessionRecorder>();
+#if UNITY_EDITOR
+            if (_world.GetComponent<PlayStateOverlay>() == null)
+                _world.gameObject.AddComponent<PlayStateOverlay>();
+#endif
 
-            bootstrap.Reanalyse();
+            _world.Reanalyse();
         }
 
         private Camera CreateCamera()
@@ -71,36 +144,126 @@ namespace DesalEra.Unity
             camera.fieldOfView = cameraFieldOfView;
             camera.nearClipPlane = 0.15f;
             camera.farClipPlane = 400f;
+            // Sea contact foam samples the scene depth at posts and hulls.
+            camera.depthTextureMode |= DepthTextureMode.Depth;
             cameraGo.AddComponent<AudioListener>();
             return camera;
         }
 
         /// <summary>
-        /// A single directional light plus fog. No skybox asset: a flat background
-        /// colour is honest about being a greybox and costs nothing to load.
+        /// Skybox + keyed sun + fill light. Flat grey backgrounds erase form; a cloudy
+        /// panoramic (CC0 ambientCG DaySkyHDRI068B) gives horizon, ambient bounce and
+        /// a reason for metal/wood to catch light differently on each face.
         /// </summary>
         private void BuildLighting()
         {
-            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = skyColour;
-            RenderSettings.ambientEquatorColor = skyColour * 0.8f;
-            RenderSettings.ambientGroundColor = skyColour * 0.45f;
+            Material sky = LoadSkybox(skyboxFile, out Texture skyPanorama);
+            if (sky != null)
+            {
+                RenderSettings.skybox = sky;
+                RenderSettings.ambientMode = AmbientMode.Skybox;
+                RenderSettings.ambientIntensity = 0.95f;
+                DynamicGI.UpdateEnvironment();
+                // Water must sample the same panorama — SpecCube alone was too muted
+                // to read as a sky mirror against our grey body color.
+                if (_world != null)
+                    _world.BindSkyReflection(skyPanorama, rotationDeg: 120f);
+            }
+            else
+            {
+                RenderSettings.ambientMode = AmbientMode.Trilight;
+                RenderSettings.ambientSkyColor = skyColour;
+                RenderSettings.ambientEquatorColor = skyColour * 0.8f;
+                RenderSettings.ambientGroundColor = skyColour * 0.45f;
+            }
 
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
             RenderSettings.fogColor = fogColour;
             RenderSettings.fogDensity = fogDensity;
 
+            // Soft shadows are what make round posts and beveled planks read as volume;
+            // without them the skybox alone cannot sell form.
+            QualitySettings.shadows = ShadowQuality.All;
+            QualitySettings.shadowResolution = ShadowResolution.High;
+            QualitySettings.shadowDistance = 90f;
+            QualitySettings.shadowCascades = 2;
+
             var lightGo = new GameObject("Sun");
             lightGo.transform.SetParent(transform, worldPositionStays: false);
             lightGo.transform.localRotation = Quaternion.LookRotation(-lightDirection.normalized, Vector3.up);
             Light sun = lightGo.AddComponent<Light>();
             sun.type = LightType.Directional;
+            // Soft overcast key — hard warm sun made the grey sky and teal sea fight.
             sun.intensity = 1.05f;
-            sun.color = new Color(1f, 0.96f, 0.88f);
+            sun.color = new Color(0.92f, 0.94f, 0.98f);
             sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = 0.55f;
+            sun.shadowBias = 0.04f;
+            sun.shadowNormalBias = 0.3f;
 
-            Camera.main.backgroundColor = skyColour;
+            // Cool fill from the opposite side so cylinder sides read round instead of
+            // silhouetting against a single hard key.
+            var fillGo = new GameObject("Fill");
+            fillGo.transform.SetParent(transform, worldPositionStays: false);
+            fillGo.transform.localRotation = Quaternion.LookRotation(
+                new Vector3(-lightDirection.x, -0.2f, -lightDirection.z).normalized, Vector3.up);
+            Light fill = fillGo.AddComponent<Light>();
+            fill.type = LightType.Directional;
+            fill.intensity = 0.35f;
+            fill.color = new Color(0.72f, 0.80f, 0.90f);
+            fill.shadows = LightShadows.None;
+
+            Camera main = Camera.main;
+            if (main != null)
+            {
+                main.clearFlags = sky != null ? CameraClearFlags.Skybox : CameraClearFlags.SolidColor;
+                main.backgroundColor = skyColour;
+                main.allowHDR = true;
+            }
+        }
+
+        /// <summary>
+        /// Loads an equirectangular JPG from StreamingAssets as a Skybox/Panoramic material.
+        /// Returns null when the file or shader is missing so lighting can fall back cleanly.
+        /// </summary>
+        private static Material LoadSkybox(string relativePath, out Texture panorama)
+        {
+            panorama = null;
+            if (string.IsNullOrEmpty(relativePath)) return null;
+
+            string full = Path.Combine(Application.streamingAssetsPath, "textures", relativePath);
+            if (!File.Exists(full))
+            {
+                // Also accept paths that already include the textures/ prefix.
+                full = Path.Combine(Application.streamingAssetsPath, relativePath);
+            }
+
+            if (!File.Exists(full)) return null;
+
+            Shader shader = Shader.Find("Skybox/Panoramic")
+                            ?? Shader.Find("Skybox/Cubemap")
+                            ?? Shader.Find("Skybox/6 Sided");
+            if (shader == null) return null;
+
+            byte[] bytes = File.ReadAllBytes(full);
+            var texture = new Texture2D(2, 2, TextureFormat.RGB24, false);
+            if (!texture.LoadImage(bytes, markNonReadable: false)) return null;
+
+            texture.name = Path.GetFileName(relativePath);
+            texture.wrapMode = TextureWrapMode.Repeat;
+            texture.filterMode = FilterMode.Bilinear;
+            texture.anisoLevel = 0;
+            panorama = texture;
+
+            var material = new Material(shader) { name = "Sky_DayOvercast" };
+            if (material.HasProperty("_MainTex")) material.SetTexture("_MainTex", texture);
+            else if (material.HasProperty("_Tex")) material.SetTexture("_Tex", texture);
+            if (material.HasProperty("_Exposure")) material.SetFloat("_Exposure", 1.05f);
+            if (material.HasProperty("_Rotation")) material.SetFloat("_Rotation", 120f);
+            // 0 = Latitude-Longitude mapping on Skybox/Panoramic.
+            if (material.HasProperty("_Mapping")) material.SetFloat("_Mapping", 0f);
+            return material;
         }
     }
 }

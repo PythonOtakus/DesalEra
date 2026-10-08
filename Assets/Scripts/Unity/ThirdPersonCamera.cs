@@ -93,6 +93,8 @@ namespace DesalEra.Unity
         }
 
         public float Distance => distance;
+        public float Yaw => _yaw;
+        public float Pitch => _pitch;
 
         public void Initialise(Transform target, Camera camera)
         {
@@ -101,6 +103,20 @@ namespace DesalEra.Unity
 
             _pivot = PivotPoint();
             ApplyTransform(1f);
+        }
+
+        /// <summary>Set orbit angles (and optional distance) for CLI / session replay.</summary>
+        public void SetOrbit(float yaw, float pitch, float newDistance = -1f)
+        {
+            _yaw = yaw;
+            _pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
+            if (newDistance > 0f)
+                distance = Mathf.Clamp(newDistance, minDistance, maxDistance);
+            if (_target != null)
+            {
+                _pivot = PivotPoint();
+                ApplyTransform(1f);
+            }
         }
 
         private Vector3 PivotPoint()

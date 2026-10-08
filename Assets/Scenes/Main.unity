@@ -152,10 +152,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   cameraFieldOfView: 60
-  lightDirection: {x: 0.4, y: -0.8, z: 0.45}
-  skyColour: {r: 0.42, g: 0.48, b: 0.52, a: 1}
-  fogColour: {r: 0.36, g: 0.42, b: 0.46, a: 1}
-  fogDensity: 0.018
+  lightDirection: {x: 0.55, y: -0.75, z: 0.35}
+  skyColour: {r: 0.55, g: 0.62, b: 0.68, a: 1}
+  fogColour: {r: 0.58, g: 0.64, b: 0.7, a: 1}
+  fogDensity: 0.01
+  skyboxFile: sky/sky_DaySkyHDRI070B.jpg
 --- !u!4 &400365623
 Transform:
   m_ObjectHideFlags: 0

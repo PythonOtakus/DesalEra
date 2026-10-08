@@ -8,6 +8,8 @@
 /[Uu]serSettings/
 /[Mm]emoryCaptures/
 /[Rr]ecordings/
+/SessionRecordings/*.json
+!/SessionRecordings/.gitkeep
 
 # Never ignore .meta files for tracked assets
 !/[Aa]ssets/**/*.meta
