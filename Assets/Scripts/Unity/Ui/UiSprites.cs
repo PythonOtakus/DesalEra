@@ -213,6 +213,10 @@ namespace DesalEra.Unity.Ui
                         s.Box(size * 0.44f, size * 0.30f, size * 0.28f, size * 0.16f, wood * 0.84f);
                         s.Box(size * 0.58f, size * 0.12f, size * 0.28f, size * 0.16f, wood * 0.76f);
                         break;
+                    case "Beam":
+                        s.Box(size * 0.08f, size * 0.42f, size * 0.84f, size * 0.16f, steel);
+                        s.Box(size * 0.08f, size * 0.46f, size * 0.84f, size * 0.04f, steel * 0.7f);
+                        break;
                     default: // Deck
                         s.Box(size * 0.10f, size * 0.28f, size * 0.80f, size * 0.44f, wood);
                         s.Box(size * 0.10f, size * 0.38f, size * 0.80f, size * 0.03f, wood * 0.5f);

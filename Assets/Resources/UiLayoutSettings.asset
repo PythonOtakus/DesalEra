@@ -102,19 +102,19 @@ MonoBehaviour:
     preferredHeight: 0
   detailWidth: 460
   padDetail:
-    left: 0.184
+    left: 0.087
     bottom: 0.07
     right: 0.09
-    top: 0.025
+    top: 0.002
   detailStackSpacing: 10
   detailRowHeight: 76
-  detailRowSpacing: 8
+  detailRowSpacing: 10.28
   detailTitle:
     size: 36
     lineSpacing: 1
     alignment: 4
     bold: 1
-    preferredHeight: 52
+    preferredHeight: 80
   detailWarning:
     size: 22
     lineSpacing: 1
@@ -136,7 +136,7 @@ MonoBehaviour:
   detailRowSub:
     size: 20
     lineSpacing: 1
-    alignment: 3
+    alignment: 0
     bold: 0
     preferredHeight: 0
   detailHint:

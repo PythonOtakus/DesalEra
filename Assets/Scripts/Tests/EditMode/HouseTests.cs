@@ -194,7 +194,7 @@ namespace DesalEra.Tests
             var raft = new RaftState();
             raft.Inventory.Clear();
             Assert.AreEqual("not enough resources",
-                raft.CanPlace(BuildPiece.Deck(), new Vector2Int(1, 0), 0, 0, out _));
+                raft.CanPlace(BuildPiece.Beam(), new Vector2Int(1, 0), 0, 0, out _));
         }
 
         // --- collapse ---
@@ -284,15 +284,17 @@ namespace DesalEra.Tests
         public void ColumnOnABeamSplitsIt()
         {
             RaftState raft = RichRaft();
+            // 6 m beam from (1,0)→(3,0); column at (2,0) lands on its mid-span.
+            Assert.IsNull(raft.TryPlace(BuildPiece.Beam(RaftState.CellSize * 2f), new Vector2Int(1, 0)));
             int before = raft.MemberCount;
-            Assert.IsNull(raft.TryPlace(BuildPiece.Column(), new Vector2Int(0, -1)));
+            Assert.IsNull(raft.TryPlace(BuildPiece.Column(), new Vector2Int(2, 0)));
             Assert.AreEqual(before + 2, raft.MemberCount, "the column, plus the far half of the 6 m beam it stands on");
 
             foreach (Member m in raft.Gravity.Members)
             {
                 if (m.IsFailed) continue;
                 raft.TryGetPiece(m.Id, out BuildPiece piece);
-                if (piece?.Name == "Deck") Assert.AreEqual(m.LengthM, Vector3.Distance(
+                if (piece?.Name == "Beam") Assert.AreEqual(m.LengthM, Vector3.Distance(
                     raft.Gravity.JointAt(m.JointA).Position, raft.Gravity.JointAt(m.JointB).Position), 1e-3f);
             }
         }
@@ -310,7 +312,9 @@ namespace DesalEra.Tests
         [Test]
         public void BracingSavesTheRoofInAStorm()
         {
-            const float storm = 10f;
+            // Closed starter frame (cross beams) is stiffer than the old perimeter;
+            // 26 kN/m shears an unbraced roof while braces keep it.
+            const float storm = 26f;
             RaftState bare = RaftWithFloor();
             bare.WindLoadKnPerM = storm;
             bare.SolveWind();

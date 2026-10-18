@@ -33,12 +33,12 @@ namespace DesalEra.Tests
         }
 
         [Test]
-        public void ColumnAndDeckShareAGridPoint()
+        public void ColumnAndBeamShareAGridPoint()
         {
             RaftState raft = RichRaft();
             Assert.IsNull(raft.TryPlace(BuildPiece.Column(), new Vector2Int(1, 0)));
-            Assert.IsNull(raft.TryPlace(BuildPiece.Deck(), new Vector2Int(1, 0)),
-                "a column and a deck beam sit on the same joint and must not block each other");
+            Assert.IsNull(raft.TryPlace(BuildPiece.Beam(), new Vector2Int(1, 0)),
+                "a column and a beam sit on the same joint and must not block each other");
             Assert.IsNotNull(raft.TryPlace(BuildPiece.Column(), new Vector2Int(1, 0)),
                 "the same socket twice must still be refused");
         }
@@ -49,25 +49,34 @@ namespace DesalEra.Tests
             RaftState raft = RichRaft();
             Assert.IsNull(raft.TryPlace(BuildPiece.Column(), Vector2Int.zero));
             Assert.IsNull(raft.TryDismantle(Vector2Int.zero), "the column comes off first");
-            Assert.AreEqual("That is the spawn deck.", raft.TryDismantle(Vector2Int.zero),
+
+            // Origin also holds starter beams/planks; clear them until only the marker remains.
+            string last = null;
+            for (int i = 0; i < 16; i++)
+            {
+                last = raft.TryDismantle(Vector2Int.zero);
+                if (last == "That is the spawn deck.") break;
+                Assert.IsNull(last, $"unexpected refusal while clearing spawn cell: {last}");
+            }
+            Assert.AreEqual("That is the spawn deck.", last,
                 "the spawn marker itself is never dismantled");
         }
 
         [Test]
-        public void WestFacingDeckIsTheSameBeamAsTheEastFacingNeighbour()
+        public void WestFacingBeamIsTheSameAsTheEastFacingNeighbour()
         {
             RaftState raft = RichRaft();
-            Assert.IsNull(raft.TryPlace(BuildPiece.Deck(), new Vector2Int(1, 0), 0, facing: 0));
+            Assert.IsNull(raft.TryPlace(BuildPiece.Beam(), new Vector2Int(1, 0), 0, facing: 0));
             Assert.AreEqual("that platform is already occupied",
-                raft.TryPlace(BuildPiece.Deck(), new Vector2Int(2, 0), 0, facing: 2));
+                raft.TryPlace(BuildPiece.Beam(), new Vector2Int(2, 0), 0, facing: 2));
         }
 
         [Test]
-        public void FacingRotatesTheDeckDirection()
+        public void FacingRotatesTheBeamDirection()
         {
             RaftState raft = RichRaft();
             int before = raft.MemberCount;
-            Assert.IsNull(raft.TryPlace(BuildPiece.Deck(), new Vector2Int(1, 1), 0, facing: 1));
+            Assert.IsNull(raft.TryPlace(BuildPiece.Beam(), new Vector2Int(1, 1), 0, facing: 1));
             Assert.AreEqual(before + 1, raft.MemberCount);
 
             var member = raft.Gravity.Members[raft.MemberCount - 1];
@@ -75,7 +84,7 @@ namespace DesalEra.Tests
             Vector3 b = raft.Gravity.JointAt(member.JointB).Position;
             Vector3 d = b - a;
             Assert.AreEqual(0f, d.x, 1e-3f);
-            Assert.AreEqual(RaftState.CellSize, d.z, 1e-3f, "north-facing deck runs along +Z");
+            Assert.AreEqual(RaftState.CellSize, d.z, 1e-3f, "north-facing beam runs along +Z");
         }
 
         [Test]
@@ -96,10 +105,10 @@ namespace DesalEra.Tests
             RaftState raft = RichRaft();
             Assert.IsNull(raft.TryPlace(BuildPiece.Column(), new Vector2Int(1, 0)));
             Assert.AreEqual("a raised beam needs support at both ends",
-                raft.TryPlace(BuildPiece.Deck(), new Vector2Int(1, 0), level: 1));
+                raft.TryPlace(BuildPiece.Beam(), new Vector2Int(1, 0), level: 1));
 
             Assert.IsNull(raft.TryPlace(BuildPiece.Column(), new Vector2Int(1, -1)));
-            Assert.IsNull(raft.TryPlace(BuildPiece.Deck(), new Vector2Int(1, -1), level: 1, facing: 1));
+            Assert.IsNull(raft.TryPlace(BuildPiece.Beam(), new Vector2Int(1, -1), level: 1, facing: 1));
         }
 
         [Test]

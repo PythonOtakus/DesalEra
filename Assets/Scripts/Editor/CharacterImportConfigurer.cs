@@ -27,8 +27,10 @@ namespace DesalEra.EditorTools
         private const string ArtRoot = "Assets/Art/Characters";
 
         /// <summary>
-        /// The survivor also lives under Resources so it can be loaded at runtime,
-        /// which keeps the character replaceable without touching a scene file.
+        /// The animation sources live under Art. The survivor rig and its textures live in
+        /// Resources because that is where the player loads them from, and they are not
+        /// duplicated under Art: the two copies were byte-identical, so keeping both cost
+        /// 25 MB of disk and git to guarantee they would drift.
         /// </summary>
         private static readonly string[] ImportRoots = { ArtRoot, "Assets/Resources" };
 

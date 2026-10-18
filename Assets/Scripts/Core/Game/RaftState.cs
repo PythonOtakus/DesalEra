@@ -39,17 +39,39 @@ namespace DesalEra.Game
         /// <summary>Rescued villagers gained by placing this piece. Rewards expansion.</summary>
         public int PopulationGrant;
 
-        public static BuildPiece Deck(float lengthM = 3f)
+        /// <summary>
+        /// A steel beam spanning one grid edge. Structural: fills BX/BZ sockets and
+        /// must close a square before a wood deck plank can be laid.
+        /// </summary>
+        public static BuildPiece Beam(float lengthM = 3f)
+        {
+            var piece = new BuildPiece
+            {
+                Name = "Beam",
+                Material = MaterialKind.Steel,
+                CrossSectionAreaM2 = 0.04f,
+                LengthM = lengthM,
+                LocalOffset = Vector3.right * lengthM
+            };
+            piece.Cost[ResourceKind.Metal] = 2;
+            return piece;
+        }
+
+        /// <summary>
+        /// A wood plank covering one grid square. Not a truss member: it only records
+        /// occupancy and expands the walkable surface once the four edge beams are in.
+        /// </summary>
+        public static BuildPiece Deck()
         {
             var piece = new BuildPiece
             {
                 Name = "Deck",
                 Material = MaterialKind.Wood,
                 CrossSectionAreaM2 = 0.09f,
-                LengthM = lengthM,
-                LocalOffset = Vector3.right * lengthM
+                LengthM = RaftState.CellSize,
+                LocalOffset = Vector3.zero
             };
-            piece.Cost[ResourceKind.Plank] = 4;
+            piece.Cost[ResourceKind.Plank] = 2;
             return piece;
         }
 
@@ -78,15 +100,20 @@ namespace DesalEra.Game
         /// fuel drum actually is. A solid plastic pontoon nets only 50 kg of lift per
         /// cubic metre and cannot hold up a deck.
         /// </summary>
-        public static BuildPiece Pontoon(float lengthM = 1f)
+        public static BuildPiece Pontoon(float lengthM = -1f)
         {
+            // Default length reaches from deck down to the keel line, like the opening
+            // barrels. An earlier default of 1 m upward left the drum in mid-air and
+            // added weight without lift.
+            if (lengthM < 0f)
+                lengthM = RaftState.BaseDeckY - (RaftState.WaterLevelY - RaftState.KeelDepthM);
             var piece = new BuildPiece
             {
                 Name = "Pontoon",
                 Material = MaterialKind.Steel,
                 CrossSectionAreaM2 = 0.02f,
                 LengthM = lengthM,
-                LocalOffset = Vector3.up * lengthM
+                LocalOffset = Vector3.down * lengthM
             };
             piece.SealedVolumeM3 = 2.4f;
             piece.Cost[ResourceKind.Metal] = 3;
@@ -283,6 +310,7 @@ namespace DesalEra.Game
         public const string SpawnSocket = "Spawn";
         public const string VerticalSocket = "V";
         public const string RoofSocket = "R";
+        public const string FloorSocket = "F";
         public const string WallXSocket = "WX";
         public const string WallZSocket = "WZ";
         public const string StairsSocketPrefix = "S";
@@ -356,31 +384,75 @@ namespace DesalEra.Game
             AddPontoon(keelSW, deckSW, pontoonArea, sealedPerPontoon);
             AddPontoon(keelSE, deckSE, pontoonArea, sealedPerPontoon);
 
-            // Two deck beams forming the starting platform.
-            Member deckNS = Gravity.AddMember(deckNW, deckSW, MaterialKind.Wood, 0.09f);
-            Member deckEW = Gravity.AddMember(deckNW, deckNE, MaterialKind.Wood, 0.09f);
-            Member deckSEBeam = Gravity.AddMember(deckSW, deckSE, MaterialKind.Wood, 0.09f);
-            Member deckNEBeam = Gravity.AddMember(deckNE, deckSE, MaterialKind.Wood, 0.09f);
-
-            _pieceByMember[deckNS.Id] = BuildPiece.Deck(CellSize * 2f);
-            _pieceByMember[deckEW.Id] = BuildPiece.Deck(CellSize * 2f);
-            _pieceByMember[deckSEBeam.Id] = BuildPiece.Deck(CellSize * 2f);
-            _pieceByMember[deckNEBeam.Id] = BuildPiece.Deck(CellSize * 2f);
+            // Closed steel frame over the four starting cells, plus wood planks so the
+            // spawn is walkable. Beams are registered as placements (not a free-form
+            // exemption): the same closed-frame rule that players use.
+            foreach (Vector2Int cell in new[]
+                     {
+                         new Vector2Int(-1, -1), new Vector2Int(0, -1),
+                         new Vector2Int(-1, 0), new Vector2Int(0, 0),
+                         new Vector2Int(-1, 1), new Vector2Int(0, 1)
+                     })
+                PlaceStarterBeam(cell, facing: 0);
+            foreach (Vector2Int cell in new[]
+                     {
+                         new Vector2Int(-1, -1), new Vector2Int(-1, 0),
+                         new Vector2Int(0, -1), new Vector2Int(0, 0),
+                         new Vector2Int(1, -1), new Vector2Int(1, 0)
+                     })
+                PlaceStarterBeam(cell, facing: 1);
+            foreach (Vector2Int cell in new[]
+                     {
+                         new Vector2Int(-1, -1), new Vector2Int(0, -1),
+                         new Vector2Int(-1, 0), new Vector2Int(0, 0)
+                     })
+                PlaceStarterFloor(cell);
 
             // The origin is the spawn point. It occupies its own socket so it counts as
-            // structure for adjacency, without blocking a column or deck at that point.
+            // structure for adjacency, without blocking a column or beam at that point.
             Record(new PlacementKey(Vector2Int.zero, 0, SpawnSocket), new List<int>());
 
             Gravity.RecomputeAllDerived();
 
             // A starting kit rather than a full loadout. Enough to add another pontoon
-            // and a deck immediately, so the first minute teaches the loop instead of
-            // gating it behind a grind.
+            // and extend a beam/plank immediately, so the first minute teaches the loop
+            // instead of gating it behind a grind.
             Inventory.Add(ResourceKind.Plank, 8);
             Inventory.Add(ResourceKind.Scrap, 6);
             Inventory.Add(ResourceKind.Metal, 4);
             Inventory.Add(ResourceKind.Water, 3);
             Inventory.Add(ResourceKind.Food, 2);
+        }
+
+        private void PlaceStarterBeam(Vector2Int cell, int facing)
+        {
+            // Salvaged timber beams for the opening frame: wood section matches the old
+            // perimeter mass/strength so the raft still floats and a calm two-storey
+            // house stands. The palette Beam() stays steel for player builds.
+            var piece = BuildPiece.Beam();
+            piece.Material = MaterialKind.Wood;
+            piece.CrossSectionAreaM2 = 0.09f;
+            piece.Cost.Clear();
+            PlacementKey key = KeyFor(piece, cell, 0, facing);
+            if (_placed.ContainsKey(key)) return;
+
+            var ids = new List<int>();
+            var segments = new List<(Vector3, Vector3)>();
+            SegmentsFor(piece, key, segments);
+            foreach ((Vector3 from, Vector3 to) in segments)
+                ids.Add(AddPieceMember(piece, from, to, key));
+            Record(key, ids);
+            _pieceByKey[key] = piece;
+        }
+
+        private void PlaceStarterFloor(Vector2Int cell)
+        {
+            var piece = BuildPiece.Deck();
+            piece.Cost.Clear();
+            var key = new PlacementKey(cell, 0, FloorSocket);
+            if (_placed.ContainsKey(key)) return;
+            Record(key, new List<int>());
+            _pieceByKey[key] = piece;
         }
 
         /// <summary>
@@ -497,6 +569,44 @@ namespace DesalEra.Game
             }
         }
 
+        /// <summary>Every wood floor plank (socket F), oldest first.</summary>
+        public IEnumerable<PlacementKey> FloorCells
+        {
+            get
+            {
+                foreach (PlacementKey key in _placementOrder)
+                {
+                    if (key.Socket == FloorSocket) yield return key;
+                }
+            }
+        }
+
+        public bool HasFloorAt(Vector2Int cell, int level = 0) =>
+            _placed.ContainsKey(new PlacementKey(cell, level, FloorSocket));
+
+        /// <summary>
+        /// True when the four edges of the square whose south-west corner is
+        /// <paramref name="cell"/> still have live beams at <paramref name="level"/>.
+        /// </summary>
+        public bool HasClosedBeamFrame(Vector2Int cell, int level = 0)
+        {
+            return HasLiveBeam(new PlacementKey(cell, level, "BX"))
+                && HasLiveBeam(new PlacementKey(new Vector2Int(cell.x, cell.y + 1), level, "BX"))
+                && HasLiveBeam(new PlacementKey(cell, level, "BZ"))
+                && HasLiveBeam(new PlacementKey(new Vector2Int(cell.x + 1, cell.y), level, "BZ"));
+        }
+
+        private bool HasLiveBeam(PlacementKey key)
+        {
+            if (!_placed.TryGetValue(key, out List<int> ids) || ids.Count == 0) return false;
+            foreach (int id in ids)
+            {
+                Member m = FindMember(id);
+                if (m != null && !m.IsFailed) return true;
+            }
+            return false;
+        }
+
         /// <summary>0 = east (+X), 1 = north (+Z), 2 = west (-X), 3 = south (-Z).</summary>
         public static int NormaliseFacing(int facing) => ((facing % 4) + 4) % 4;
 
@@ -522,12 +632,14 @@ namespace DesalEra.Game
             int f = NormaliseFacing(facing);
             switch (piece.Name)
             {
-                case "Deck":
+                case "Beam":
                 case "Wall":
                     if (f == 2) { cell.x -= 1; f = 0; }
                     else if (f == 3) { cell.y -= 1; f = 1; }
                     if (piece.Name == "Wall") return new PlacementKey(cell, level, f == 0 ? WallXSocket : WallZSocket);
                     return new PlacementKey(cell, level, f == 0 ? "BX" : "BZ");
+                case "Deck":
+                    return new PlacementKey(cell, level, FloorSocket);
                 case "Brace":
                     return new PlacementKey(cell, level, "D" + f);
                 case "Stairs":
@@ -591,6 +703,16 @@ namespace DesalEra.Game
                     into.Add((c[1], c[2]));
                     return;
                 }
+                case "Deck":
+                {
+                    // Preview as the square's four edges (thin plank outline).
+                    Vector3[] c = RoofCorners(key.Cell, key.Level);
+                    into.Add((c[0], c[1]));
+                    into.Add((c[1], c[3]));
+                    into.Add((c[3], c[2]));
+                    into.Add((c[2], c[0]));
+                    return;
+                }
                 case "Wall":
                 {
                     // One diagonal of the panel, bottom of one column to the top of the other.
@@ -635,9 +757,13 @@ namespace DesalEra.Game
             if (!Inventory.TrySpend(piece.Cost)) return "not enough resources";
 
             var ids = new List<int>();
-            foreach ((Vector3 from, Vector3 to) in plan.Segments)
+            // Floor planks are occupancy + walk surface only; they do not enter the truss.
+            if (piece.Name != "Deck")
             {
-                ids.Add(AddPieceMember(piece, from, to, plan.Key));
+                foreach ((Vector3 from, Vector3 to) in plan.Segments)
+                {
+                    ids.Add(AddPieceMember(piece, from, to, plan.Key));
+                }
             }
 
             Record(plan.Key, ids);
@@ -667,13 +793,16 @@ namespace DesalEra.Game
 
             PlacementKey key = KeyFor(piece, cell, level, facing);
             plan = new PlacementPlan { Piece = piece, Key = key, Facing = FacingOf(key) };
-            if (piece.Name != "Deck" && piece.Name != "Wall") plan.Facing = NormaliseFacing(facing);
+            if (piece.Name != "Beam" && piece.Name != "Wall") plan.Facing = NormaliseFacing(facing);
             SegmentsFor(piece, key, plan.Segments);
 
             if (!IsWithinBounds(cell)) return "outside the buildable area";
             if (piece.Name == "Roof" && level < 1) return "a roof must sit on top of columns";
             if (piece.Name == "Pontoon" && level > 0) return "pontoons only go at deck level";
             if (_placed.ContainsKey(key)) return "that platform is already occupied";
+
+            if (piece.Name == "Deck" && !HasClosedBeamFrame(key.Cell, key.Level))
+                return "need closed steel frame";
 
             string support = SupportProblem(piece, key, cell, null);
             if (support != null) return support;
@@ -708,6 +837,7 @@ namespace DesalEra.Game
 
             if (!hangs)
             {
+                if (name == "Deck") return null; // closed-frame check is separate
                 return TouchesStructure(requestedCell) || TouchesStructure(key.Cell)
                     ? null
                     : "must connect to the existing structure";
@@ -724,6 +854,11 @@ namespace DesalEra.Game
                         if (!Held(corner)) return "a roof needs a column at every corner";
                     }
                     return null;
+
+                case "Deck":
+                    return HasClosedBeamFrame(key.Cell, level)
+                        ? null
+                        : "need closed steel frame";
 
                 case "Wall":
                 {
@@ -752,7 +887,7 @@ namespace DesalEra.Game
                     SegmentsFor(piece, key, segments);
                     (Vector3 root, Vector3 tip) = segments[0];
                     if (!Held(root)) return "needs support below; build a column first";
-                    if (name == "Deck" && !Held(tip)) return "a raised beam needs support at both ends";
+                    if (name == "Beam" && !Held(tip)) return "a raised beam needs support at both ends";
                     return null;
                 }
             }
@@ -863,9 +998,16 @@ namespace DesalEra.Game
                     if (!allFailed)
                     {
                         if (!_pieceByKey.TryGetValue(key, out BuildPiece piece)) continue;
-                        bool hangs = key.Level > 0 || piece.Name == "Wall" || piece.Name == "Stairs";
-                        if (!hangs) continue;
-                        if (SupportProblem(piece, key, key.Cell, ids) == null) continue;
+                        if (piece.Name == "Deck" || key.Socket == FloorSocket)
+                        {
+                            if (HasClosedBeamFrame(key.Cell, key.Level)) continue;
+                        }
+                        else
+                        {
+                            bool hangs = key.Level > 0 || piece.Name == "Wall" || piece.Name == "Stairs";
+                            if (!hangs) continue;
+                            if (SupportProblem(piece, key, key.Cell, ids) == null) continue;
+                        }
                     }
 
                     foreach (int id in ids)
@@ -893,6 +1035,12 @@ namespace DesalEra.Game
         {
             int a = FindOrCreateJoint(from);
             int b = FindOrCreateJoint(to);
+            // Player pontoons must pin the submerged tip, same as the opening barrels.
+            if (piece.Name == "Pontoon")
+            {
+                int lower = Gravity.Joints[a].Position.y <= Gravity.Joints[b].Position.y ? a : b;
+                Gravity.Joints[lower].IsAnchored = true;
+            }
             Member member = Gravity.AddMember(a, b, piece.Material, piece.CrossSectionAreaM2, piece.IsCantilever);
             member.SealedVolumeM3 = piece.SealedVolumeM3;
 
@@ -980,6 +1128,12 @@ namespace DesalEra.Game
             List<int> ids = _placed[key];
             bool refunded = false;
 
+            if (_pieceByKey.TryGetValue(key, out BuildPiece placedPiece) && placedPiece.Cost.Count > 0)
+            {
+                Inventory.RefundFraction(placedPiece.Cost);
+                refunded = true;
+            }
+
             foreach (int memberId in ids)
             {
                 Member member = FindMember(memberId);
@@ -1042,7 +1196,7 @@ namespace DesalEra.Game
             foreach (PlacementKey key in _placementOrder)
             {
                 float y;
-                if (key.Socket == RoofSocket)
+                if (key.Socket == RoofSocket || (key.Socket == FloorSocket && key.Level > 0))
                 {
                     float x0 = key.Cell.x * CellSize - edge, x1 = (key.Cell.x + 1) * CellSize + edge;
                     float z0 = key.Cell.y * CellSize - edge, z1 = (key.Cell.y + 1) * CellSize + edge;
@@ -1154,45 +1308,27 @@ namespace DesalEra.Game
         private const float DeckMargin = 0.6f;
 
         /// <summary>
-        /// True when a world position is standing on the raft's deck.
-        ///
-        /// Tested against the deck's footprint rather than against its beams, because
-        /// beams are one-dimensional and the opening raft's deck is a 6 m perimeter frame
-        /// with nothing across the middle. Measuring to the beams reports the spawn point
-        /// -- the origin, the middle of the raft -- as open sea.
-        ///
-        /// The footprint is the convex hull of every joint at deck level, so it grows as
-        /// the player places deck. Testing a hull rather than a bounding box keeps the
-        /// corners honest for the rectangular growth this raft actually does.
+        /// True when a world position is standing on a wood floor plank (or within
+        /// <paramref name="margin"/> of one). Beams alone are not walkable.
         /// </summary>
         public bool IsOverDeck(Vector3 worldPos, float margin = DeckMargin)
         {
-            List<Vector2> hull = DeckFootprint();
-            if (hull.Count < 3) return false;
-
             var point = new Vector2(worldPos.x, worldPos.z);
-
-            // A point is inside a convex polygon when it is left of every directed edge.
-            bool inside = true;
-            for (int i = 0; i < hull.Count; i++)
+            foreach (PlacementKey key in FloorCells)
             {
-                Vector2 a = hull[i];
-                Vector2 b = hull[(i + 1) % hull.Count];
-                if (Cross(b - a, point - a) < 0f) { inside = false; break; }
+                if (key.Level != 0) continue;
+                if (PointNearCellSquare(point, key.Cell, margin)) return true;
             }
-
-            if (inside) return true;
-
-            // Outside the hull, allow a step onto the edge. Without this the survivor would
-            // have to land exactly inside the outline to get back aboard.
-            for (int i = 0; i < hull.Count; i++)
-            {
-                Vector2 a = hull[i];
-                Vector2 b = hull[(i + 1) % hull.Count];
-                if (DistanceSqToSegment(point, a, b) <= margin * margin) return true;
-            }
-
             return false;
+        }
+
+        private static bool PointNearCellSquare(Vector2 point, Vector2Int cell, float margin)
+        {
+            float x0 = cell.x * CellSize - margin;
+            float x1 = (cell.x + 1) * CellSize + margin;
+            float z0 = cell.y * CellSize - margin;
+            float z1 = (cell.y + 1) * CellSize + margin;
+            return point.x >= x0 && point.x <= x1 && point.y >= z0 && point.y <= z1;
         }
 
         /// <summary>
@@ -1229,21 +1365,23 @@ namespace DesalEra.Game
         }
 
         /// <summary>
-        /// The deck's outline in the XZ plane, as a convex hull over deck-level joints.
-        ///
-        /// Columns, pontoons and braces do not contribute: their joints are not at deck
-        /// level, so this describes the horizontal walking surface and not the whole raft.
+        /// The deck's outline in the XZ plane: convex hull of every level-0 floor plank.
+        /// Used for climb-out targeting and the floor mesh; walk tests use
+        /// <see cref="IsOverDeck"/> (exact union of planks).
         /// </summary>
         public List<Vector2> DeckFootprint()
         {
             var points = new List<Vector2>();
-
-            foreach (Joint joint in Gravity.Joints)
+            foreach (PlacementKey key in FloorCells)
             {
-                if (Mathf.Abs(joint.Position.y - BaseDeckY) > DeckLevelTolerance) continue;
-                points.Add(new Vector2(joint.Position.x, joint.Position.z));
+                if (key.Level != 0) continue;
+                float x0 = key.Cell.x * CellSize, x1 = (key.Cell.x + 1) * CellSize;
+                float z0 = key.Cell.y * CellSize, z1 = (key.Cell.y + 1) * CellSize;
+                points.Add(new Vector2(x0, z0));
+                points.Add(new Vector2(x1, z0));
+                points.Add(new Vector2(x0, z1));
+                points.Add(new Vector2(x1, z1));
             }
-
             return ConvexHull(points);
         }
 

@@ -13,6 +13,7 @@ namespace DesalEra.Unity.Ui
         {
             switch (name)
             {
+                case "Beam": return "钢梁";
                 case "Deck": return "甲板";
                 case "Column": return "立柱";
                 case "Pontoon": return "浮筒";
@@ -121,6 +122,8 @@ namespace DesalEra.Unity.Ui
                     return "下方没有支撑，请先立柱。";
                 case "a raised beam needs support at both ends":
                     return "高处的梁两端都需要支撑。";
+                case "need closed steel frame":
+                    return "需要先围合钢梁。";
                 case "a wall needs a column at both ends":
                     return "墙两端都需要立柱（上下都要连通）。";
                 case "stairs need something to stand on at the bottom":

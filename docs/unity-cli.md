@@ -204,7 +204,7 @@ Cli 'player_look' '{"yaw":90,"pitch":18,"distance":7}'
 | `player_forward` / `back` / `left` / `right` / `stop` / `sprint` | — | 移动（无 JSON） |
 | `player_move` | `h`,`v`,`sprint` | 任意轴向移动 |
 | `player_look` | `yaw`,`pitch`,`distance?` | 右键环视 / 滚轮 |
-| `player_select` | `index` 0..7 | 1–8 选构件（甲板/立柱/浮筒/斜撑/淡化器/屋顶/墙/楼梯） |
+| `player_select` | `index` 0..7 | 1–8 选构件（钢梁/甲板/立柱/浮筒/斜撑/屋顶/墙/楼梯） |
 | `player_build` | `cell_x`,`cell_y`,`index?`,`level?`,`facing?` | 左键建造（level 0–2，facing 0东/1北/2西/3南；省略则用当前设置） |
 | `player_dismantle` | `cell_x`,`cell_y`,`level?` | 右键单击拆除（无竖向构件时拆以该点为角的屋顶） |
 | `player_rotate` | `facing?` | R 旋转朝向（省略则转一步） |

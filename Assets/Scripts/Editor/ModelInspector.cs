@@ -20,7 +20,9 @@ namespace DesalEra.EditorTools
         {
             var report = new StringBuilder();
 
-            foreach (string guid in AssetDatabase.FindAssets("t:Model", new[] { "Assets/Art" }))
+            // Both roots: the animation sources live under Art, the character rig the
+            // player actually loads lives in Resources.
+            foreach (string guid in AssetDatabase.FindAssets("t:Model", new[] { "Assets/Art", "Assets/Resources" }))
             {
                 string path = AssetDatabase.GUIDToAssetPath(guid);
                 var importer = AssetImporter.GetAtPath(path) as ModelImporter;

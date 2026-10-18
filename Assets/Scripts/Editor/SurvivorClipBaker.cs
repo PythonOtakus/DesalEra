@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using DesalEra.Unity;
 using UnityEditor;
 using UnityEngine;
 
@@ -41,7 +42,14 @@ namespace DesalEra.EditorTools
     {
         private const string SourceFolder = "Assets/Art/Characters/Survivor/Animations";
         private const string OutputFolder = "Assets/Resources";
-        private const string CharacterModelPath = "Assets/Art/Characters/Survivor/Models/Survivor.fbx";
+
+        /// <summary>
+        /// The rig to bake against. It lives in Resources rather than under Art because it
+        /// is the same file the player loads, and for a while it was checked in twice —
+        /// byte-identical, one copy per role — which is 13 MB of git for nothing. One copy
+        /// keeps the bake and the build provably looking at the same mesh and skeleton.
+        /// </summary>
+        private const string CharacterModelPath = "Assets/Resources/Survivor.fbx";
 
         // Stripped from every animation bone name before matching.
         private const string BonePrefix = "mixamorig:";
@@ -61,7 +69,13 @@ namespace DesalEra.EditorTools
                 { "Spine", "Spine2" },
             };
 
-        /// <summary>States that cycle until gameplay leaves them; everything else is one-shot.</summary>
+        /// <summary>
+        /// States that cycle until gameplay leaves them; everything else is one-shot.
+        ///
+        /// This is keyed by clip name, not by what is currently baked, so it lists the
+        /// unbaked rope hang as well: putting "RopeHangIdle" back into
+        /// PlayerAnimator.AllStates is then the only edit needed to get it looping again.
+        /// </summary>
         public static readonly HashSet<string> LoopingStates = new HashSet<string>(System.StringComparer.Ordinal)
         {
             "Idle", "Walk", "Run", "SwimIdle", "SwimForward", "LadderClimbLoop", "RopeHangIdle",
@@ -99,11 +113,26 @@ namespace DesalEra.EditorTools
 
             var log = new System.Text.StringBuilder();
 
-            // Every FBX dropped into the folder is baked, rather than a list kept in code.
-            // Meshy delivers one archive per animation, each holding a single clip, so a
-            // hardcoded list meant editing and recompiling the baker for every download.
-            var sources = DiscoverSources();
-            log.Append("sources=").Append(sources.Count).Append(" ");
+            // Every FBX dropped into the folder is considered, rather than a list kept in
+            // code. Meshy delivers one archive per animation, each holding a single clip,
+            // so a hardcoded list meant editing and recompiling the baker for every
+            // download.
+            //
+            // What gets baked is PlayerAnimator.AllStates, though, because the output
+            // lands in Resources and everything in Resources ships whether the game plays
+            // it or not. A source with no state to bake into is reported and skipped
+            // rather than silently written out.
+            var wanted = new HashSet<string>(PlayerAnimator.AllStates, System.StringComparer.Ordinal);
+            var sources = new List<string>();
+
+            foreach (string fbxName in DiscoverSources())
+            {
+                string state = StateNameFor(fbxName);
+                if (wanted.Contains(state)) sources.Add(fbxName);
+                else log.Append("skipped ").Append(state).Append(" || ");
+            }
+
+            log.Append("sources=").Append(sources.Count).Append("/").Append(wanted.Count).Append(" ");
 
             var character = Object.Instantiate(characterPrefab);
             character.hideFlags = HideFlags.HideAndDontSave;
@@ -117,8 +146,48 @@ namespace DesalEra.EditorTools
                 Object.DestroyImmediate(character);
             }
 
+            PruneBakedClips(wanted, log);
+
             AssetDatabase.SaveAssets();
             return log.ToString();
+        }
+
+        /// <summary>
+        /// Deletes baked clips for states that are no longer bound.
+        ///
+        /// Leaving them would be the quiet version of the problem this whole list is
+        /// about: the baker would stop producing them and the files would sit in
+        /// Resources forever, still copied into every build.
+        ///
+        /// The test is membership of <paramref name="wanted"/>, not of whatever is left
+        /// over after the bake. Asking "did this run write it?" instead would make the
+        /// prune delete the clips it had just produced, on the one run where the output
+        /// was correct.
+        /// </summary>
+        private static void PruneBakedClips(HashSet<string> wanted, System.Text.StringBuilder log)
+        {
+            foreach (string guid in AssetDatabase.FindAssets("t:AnimationClip", new[] { OutputFolder }))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (!path.StartsWith(OutputFolder + "/Survivor_", System.StringComparison.Ordinal)) continue;
+                if (!path.EndsWith(".anim", System.StringComparison.OrdinalIgnoreCase)) continue;
+
+                string clipName = System.IO.Path.GetFileNameWithoutExtension(path);
+                if (wanted.Contains(clipName.Substring("Survivor_".Length))) continue;
+
+                if (AssetDatabase.DeleteAsset(path))
+                    log.Append("pruned ").Append(clipName).Append(" || ");
+            }
+
+            // A state the game binds but nothing could supply is the failure that costs
+            // the most to notice later: the graph builds, the character runs, and one
+            // state is silently frozen on whatever frame it started on.
+            foreach (string state in wanted)
+            {
+                string outPath = OutputFolder + "/Survivor_" + state + ".anim";
+                if (!AssetDatabase.LoadAssetAtPath<AnimationClip>(outPath))
+                    log.Append("NO SOURCE for ").Append(state).Append(" || ");
+            }
         }
 
         /// <summary>

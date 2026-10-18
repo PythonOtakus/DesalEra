@@ -132,13 +132,13 @@ namespace DesalEra.Unity
         private float _settleY;
         private float _settleSpeed;
 
-private static readonly BuildPiece[] Palette =
+        private static readonly BuildPiece[] Palette =
         {
+            BuildPiece.Beam(),
             BuildPiece.Deck(),
             BuildPiece.Column(),
             BuildPiece.Pontoon(),
             BuildPiece.Brace(),
-            BuildPiece.Still(),
             BuildPiece.Roof(),
             BuildPiece.Wall(),
             BuildPiece.Stairs()

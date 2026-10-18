@@ -24,6 +24,7 @@ namespace DesalEra.Unity
         {
             switch (pieceName)
             {
+                case "Beam": return Profile.Beam;
                 case "Deck": return Profile.Plank;
                 case "Column": return Profile.Post;
                 case "Pontoon": return Profile.Drum;

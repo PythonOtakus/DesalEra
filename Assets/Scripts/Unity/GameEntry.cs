@@ -284,7 +284,7 @@ namespace DesalEra.Unity
 
             if (!File.Exists(full)) return null;
 
-            Shader shader = Shader.Find("Skybox/Panoramic")
+            Shader shader = Shader.Find(RuntimeShaders.SkyboxPanoramic)
                             ?? Shader.Find("Skybox/Cubemap")
                             ?? Shader.Find("Skybox/6 Sided");
             if (shader == null) return null;

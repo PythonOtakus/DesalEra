@@ -271,7 +271,9 @@ namespace DesalEra.Tests
 
             string error = raft.TryDismantle(new Vector2Int(0, 1));
             Assert.IsNull(error, $"dismantling should work: {error}");
-            Assert.IsTrue(raft.IsCellOccupied(new Vector2Int(0, 1)) == false);
+            Assert.IsFalse(
+                raft.IsOccupied(new PlacementKey(new Vector2Int(0, 1), 0, RaftState.VerticalSocket)),
+                "the pontoon's vertical socket must be free again");
             Assert.AreEqual(afterBuild, raft.MemberCount, "the graph keeps the failed member");
 
             Assert.IsTrue(raft.SolveBuoyancy().IsFloating,
@@ -285,7 +287,7 @@ namespace DesalEra.Tests
             raft.Inventory.Add(ResourceKind.Plank, 50);
             raft.Inventory.Add(ResourceKind.Scrap, 50);
 
-            string error = raft.TryPlace(BuildPiece.Deck(), new Vector2Int(99, 99));
+            string error = raft.TryPlace(BuildPiece.Beam(), new Vector2Int(99, 99));
             Assert.IsNotNull(error, "the raft must have a buildable boundary");
         }
 
@@ -293,18 +295,20 @@ namespace DesalEra.Tests
         public void Raft_BuildingMustTouchTheExistingStructure()
         {
             var raft = new RaftState();
-            raft.Inventory.Add(ResourceKind.Plank, 50);
+            raft.Inventory.Add(ResourceKind.Metal, 50);
             int before = raft.MemberCount;
 
-            // Two cells away with nothing in between — a floating island.
-            string error = raft.TryPlace(BuildPiece.Deck(), new Vector2Int(2, 0));
+            // Far enough that even the starter's east edge at x=1 does not touch it.
+            string error = raft.TryPlace(BuildPiece.Beam(), new Vector2Int(3, 0));
             Assert.AreEqual("must connect to the existing structure", error);
             Assert.AreEqual(before, raft.MemberCount);
 
-            Assert.IsNull(raft.TryPlace(BuildPiece.Deck(), new Vector2Int(1, 0)),
+            Assert.IsNull(raft.TryPlace(BuildPiece.Beam(), new Vector2Int(1, 0)),
                 "an edge-adjacent cell must still be allowed");
-            Assert.IsNull(raft.TryPlace(BuildPiece.Deck(), new Vector2Int(2, 0)),
+            Assert.IsNull(raft.TryPlace(BuildPiece.Beam(), new Vector2Int(2, 0)),
                 "after bridging, the next cell becomes reachable");
+            Assert.IsNull(raft.TryPlace(BuildPiece.Beam(), new Vector2Int(3, 0)),
+                "after bridging further, the far cell becomes reachable");
         }
 
         [Test]
@@ -351,9 +355,10 @@ namespace DesalEra.Tests
             var raft = new RaftState();
             raft.Inventory.Add(ResourceKind.Plank, 40);
             raft.Inventory.Add(ResourceKind.Scrap, 40);
+            raft.Inventory.Add(ResourceKind.Metal, 40);
 
             raft.TryPlace(BuildPiece.Column(), new Vector2Int(0, 1));
-            raft.TryPlace(BuildPiece.Deck(), new Vector2Int(1, 0));
+            raft.TryPlace(BuildPiece.Beam(), new Vector2Int(1, 0));
             raft.TryPlace(BuildPiece.Pontoon(), new Vector2Int(1, 1));
 
             foreach (Member m in raft.Gravity.Members)
@@ -367,16 +372,16 @@ namespace DesalEra.Tests
         public void Raft_BuoyancyDeterioratesAsLoadIsAdded()
         {
             var raft = new RaftState();
-            raft.Inventory.Add(ResourceKind.Plank, 200);
+            raft.Inventory.Add(ResourceKind.Metal, 200);
             raft.Inventory.Add(ResourceKind.Scrap, 200);
 
             float startingMargin = raft.SolveBuoyancy().NetVerticalForceKn;
             int previous = startingMargin > 0f ? 1 : -1;
 
-            // Heavy wooden decks with no extra pontoons must eat into the margin.
+            // Steel beams with no extra pontoons must eat into the margin.
             for (int i = 1; i <= 4; i++)
             {
-                raft.TryPlace(BuildPiece.Deck(RaftState.CellSize), new Vector2Int(i, 0));
+                raft.TryPlace(BuildPiece.Beam(RaftState.CellSize), new Vector2Int(i, 0));
                 float margin = raft.SolveBuoyancy().NetVerticalForceKn;
                 Assert.Less(margin, startingMargin,
                     "adding dead weight without buoyancy must reduce the margin");
@@ -401,6 +406,34 @@ namespace DesalEra.Tests
 
             float netLiftKg = member.TotalBuoyantVolumeM3 * 1000f - member.MassKg;
             Assert.Greater(netLiftKg, 0f, "a sealed barrel must be net buoyant");
+        }
+
+        [Test]
+        public void Raft_PlayerPontoonDropsToTheKeelAndAddsLift()
+        {
+            var raft = new RaftState();
+            raft.Inventory.Add(ResourceKind.Metal, 20);
+            raft.Inventory.Add(ResourceKind.Scrap, 20);
+            float before = raft.SolveBuoyancy().NetVerticalForceKn;
+
+            Assert.IsNull(raft.TryPlace(BuildPiece.Pontoon(), new Vector2Int(0, 1)));
+            float after = raft.SolveBuoyancy().NetVerticalForceKn;
+            Assert.Greater(after, before, "a submerged sealed drum must improve the margin");
+
+            Member placed = null;
+            foreach (Member m in raft.Gravity.Members)
+            {
+                if (!raft.TryGetPiece(m.Id, out BuildPiece piece) || piece.Name != "Pontoon") continue;
+                Vector3 mid = m.Midpoint;
+                if (Mathf.Abs(mid.x) > 0.2f || Mathf.Abs(mid.z - RaftState.CellSize) > 0.2f) continue;
+                placed = m;
+                break;
+            }
+            Assert.IsNotNull(placed, "expected a pontoon under grid (0,1)");
+            Vector3 a = raft.Gravity.JointAt(placed.JointA).Position;
+            Vector3 b = raft.Gravity.JointAt(placed.JointB).Position;
+            Assert.Less(Mathf.Min(a.y, b.y), RaftState.WaterLevelY, "the tip must sit below the waterline");
+            Assert.Greater(Mathf.Max(a.y, b.y), RaftState.WaterLevelY, "the top must meet the deck");
         }
 
         [Test]

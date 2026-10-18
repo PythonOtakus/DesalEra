@@ -167,9 +167,9 @@ namespace DesalEra.Unity.Ui
         {
             switch (kind)
             {
-                case ResourceKind.Plank: return "甲板与通用建材";
+                case ResourceKind.Plank: return "木甲板铺板与通用建材";
                 case ResourceKind.Scrap: return "廉价填充，多用于立柱";
-                case ResourceKind.Metal: return "坚固但重：斜撑、浮筒、淡化器";
+                case ResourceKind.Metal: return "坚固但重：钢梁、斜撑、浮筒";
                 case ResourceKind.Water: return "饮用；每人每天约一份，高温更多";
                 default: return "食用可恢复饱食，并少量补水";
             }

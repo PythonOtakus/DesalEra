@@ -264,7 +264,7 @@ namespace DesalEra.EditorTools.Cli
         }
     }
 
-    [UnityCliTool(Name = "player_select", Group = "play", Description = "Select build palette index 0..7 (Deck/Column/Pontoon/Brace/Still/Roof/Wall/Stairs).")]
+    [UnityCliTool(Name = "player_select", Group = "play", Description = "Select build palette index 0..7 (Beam/Deck/Column/Pontoon/Brace/Roof/Wall/Stairs).")]
     public static class PlayerSelectTool
     {
         public class Parameters
@@ -392,17 +392,19 @@ namespace DesalEra.EditorTools.Cli
             world.Raft.Inventory.Add(ResourceKind.Plank, 20);
             world.Raft.Inventory.Add(ResourceKind.Scrap, 20);
 
+            // Palette: 0 Beam, 1 Deck, 2 Column, 3 Pontoon, 4 Brace, 5 Roof, 6 Wall, 7 Stairs
+            const int column = 2, roof = 5;
             var log = new System.Text.StringBuilder();
             foreach (var cell in new[] { new Vector2Int(-1, -1), new Vector2Int(0, -1), new Vector2Int(-1, 0), new Vector2Int(0, 0) })
-                log.AppendLine(PlayDriver.Build(cell.x, cell.y, 1, 0, 0));
-            log.AppendLine(PlayDriver.Build(-1, -1, 5, 1, 0));
+                log.AppendLine(PlayDriver.Build(cell.x, cell.y, column, 0, 0));
+            log.AppendLine(PlayDriver.Build(-1, -1, roof, 1, 0));
 
             PlayDriver.Teleport(new Vector3(-1.5f, RaftState.BaseDeckY, -1.5f));
             return new SuccessResponse(log.ToString().TrimEnd(), PlayDriver.Capture());
         }
     }
 
-    [UnityCliTool(Name = "house_demo", Group = "play", Description = "Build a two-storey house on the starting raft: columns, walls on three sides, first floor, stairs, upper columns and a roof. Then stand at the foot of the stairs.")]
+    [UnityCliTool(Name = "house_demo", Group = "play", Description = "Build a two-storey house on the starting raft: east wing (beam/deck/pontoon), columns, braces, walls, stairs, floors and roofs. Then stand at the foot of the stairs.")]
     public static class HouseDemoTool
     {
         public static object HandleCommand(JObject @params)
@@ -411,19 +413,40 @@ namespace DesalEra.EditorTools.Cli
             var world = PlayDriver.World;
             if (world == null || world.Raft == null) return new ErrorResponse("no world");
 
-            world.Raft.Inventory.Add(ResourceKind.Plank, 80);
-            world.Raft.Inventory.Add(ResourceKind.Scrap, 40);
+            world.Raft.Inventory.Add(ResourceKind.Plank, 100);
+            world.Raft.Inventory.Add(ResourceKind.Scrap, 60);
+            world.Raft.Inventory.Add(ResourceKind.Metal, 60);
 
+            // Palette: 0 Beam, 1 Deck, 2 Column, 3 Pontoon, 4 Brace, 5 Roof, 6 Wall, 7 Stairs
+            const int beam = 0, deck = 1, column = 2, pontoon = 3, brace = 4, roof = 5, wall = 6, stairs = 7;
             var corners = new[] { new Vector2Int(-1, -1), new Vector2Int(0, -1), new Vector2Int(-1, 0), new Vector2Int(0, 0) };
             var log = new System.Text.StringBuilder();
-            foreach (var cell in corners) log.AppendLine(PlayDriver.Build(cell.x, cell.y, 1, 0, 0));
-            log.AppendLine(PlayDriver.Build(-1, -1, 5, 1, 0));
-            log.AppendLine(PlayDriver.Build(-1, -1, 6, 0, 0));
-            log.AppendLine(PlayDriver.Build(-1, -1, 6, 0, 1));
-            log.AppendLine(PlayDriver.Build(-1, 0, 6, 0, 0));
-            log.AppendLine(PlayDriver.Build(1, -1, 7, 0, 2));
-            foreach (var cell in corners) log.AppendLine(PlayDriver.Build(cell.x, cell.y, 1, 1, 0));
-            log.AppendLine(PlayDriver.Build(-1, -1, 5, 2, 0));
+
+            // East wing: closed steel frame + plank + pontoon (uses Beam/Deck/Pontoon).
+            log.AppendLine(PlayDriver.Build(1, 0, beam, 0, 0));
+            log.AppendLine(PlayDriver.Build(1, 1, beam, 0, 0));
+            log.AppendLine(PlayDriver.Build(2, 0, beam, 0, 1));
+            log.AppendLine(PlayDriver.Build(1, 0, deck, 0, 0));
+            log.AppendLine(PlayDriver.Build(1, 0, pontoon, 0, 0));
+            log.AppendLine(PlayDriver.Build(1, -1, beam, 0, 0));
+            log.AppendLine(PlayDriver.Build(2, -1, beam, 0, 1));
+            log.AppendLine(PlayDriver.Build(1, -1, deck, 0, 0));
+            log.AppendLine(PlayDriver.Build(1, -1, pontoon, 0, 0));
+
+            foreach (var cell in corners) log.AppendLine(PlayDriver.Build(cell.x, cell.y, column, 0, 0));
+            foreach (var b in new[] {
+                         (new Vector2Int(-1, -1), 0), (new Vector2Int(0, -1), 2),
+                         (new Vector2Int(-1, 0), 0), (new Vector2Int(0, 0), 2),
+                         (new Vector2Int(-1, -1), 1), (new Vector2Int(-1, 0), 3),
+                         (new Vector2Int(0, -1), 1), (new Vector2Int(0, 0), 3) })
+                log.AppendLine(PlayDriver.Build(b.Item1.x, b.Item1.y, brace, 0, b.Item2));
+            log.AppendLine(PlayDriver.Build(-1, -1, wall, 0, 0));
+            log.AppendLine(PlayDriver.Build(-1, -1, wall, 0, 1));
+            log.AppendLine(PlayDriver.Build(-1, 0, wall, 0, 0));
+            log.AppendLine(PlayDriver.Build(1, -1, stairs, 0, 2));
+            log.AppendLine(PlayDriver.Build(-1, -1, roof, 1, 0));
+            foreach (var cell in corners) log.AppendLine(PlayDriver.Build(cell.x, cell.y, column, 1, 0));
+            log.AppendLine(PlayDriver.Build(-1, -1, roof, 2, 0));
 
             PlayDriver.Teleport(new Vector3(2.6f, RaftState.BaseDeckY, -3f));
             return new SuccessResponse(log.ToString().TrimEnd(), PlayDriver.Capture());

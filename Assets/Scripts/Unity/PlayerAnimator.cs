@@ -49,15 +49,38 @@ namespace DesalEra.Unity
 
         /// <summary>
         /// Clips outside the speed bands, started by name from gameplay: swimming, the
-        /// jump off the deck edge and the ladder climb back aboard. The rope clips still
-        /// wait for something to hang from.
+        /// jump off the deck edge and the ladder climb back aboard.
+        ///
+        /// This list is also the bake whitelist: SurvivorClipBaker reads AllStates and
+        /// only produces clips the graph can bind. That matters because Resources ships
+        /// unconditionally — a clip that is baked but never played is dead weight in
+        /// every build, and the four states dropped here (JumpObstacle, LadderMountStart,
+        /// RopeHangIdle, RopeSwingToGround) were 13.7 MB of exactly that. Their source FBX
+        /// stays in Assets/Art, so wiring the gameplay up is a matter of putting the name
+        /// back here and re-running the baker.
         /// </summary>
-        private static readonly string[] SpareStates =
+        public static readonly string[] SpareStates =
         {
-            "Jump", "JumpObstacle", "SwimIdle", "SwimForward",
-            "LadderMountStart", "LadderClimbLoop", "LadderClimbFinish",
-            "RopeHangIdle", "RopeSwingToGround",
+            "Jump", "SwimIdle", "SwimForward",
+            "LadderClimbLoop", "LadderClimbFinish",
         };
+
+        /// <summary>The states UpdateForSpeed picks between, with no gameplay starting them.</summary>
+        private static readonly string[] SpeedBandStates = { "Idle", "Walk", "Run" };
+
+        /// <summary>
+        /// Every state the graph binds. Built from the two lists rather than written out,
+        /// so a state cannot be playable in the graph but absent from the bake.
+        /// </summary>
+        public static readonly string[] AllStates = BuildAllStates();
+
+        private static string[] BuildAllStates()
+        {
+            var all = new List<string>(SpeedBandStates.Length + SpareStates.Length);
+            all.AddRange(SpeedBandStates);
+            all.AddRange(SpareStates);
+            return all.ToArray();
+        }
 
         private PlayerAvatar _avatar;
 
@@ -137,10 +160,9 @@ namespace DesalEra.Unity
 
             var output = AnimationPlayableOutput.Create(_graph, "Animation", animator);
 
-            var wanted = new List<string> { "Idle", "Walk", "Run" };
-            wanted.AddRange(SpareStates);
-
-            int inputs = wanted.Count;
+            // AllStates is the whole graph: nothing may be bound that is not on it, and
+            // nothing on it may go unbaked.
+            int inputs = AllStates.Length;
             _mixer = AnimationMixerPlayable.Create(_graph, inputs);
             output.SetSourcePlayable(_mixer);
 
@@ -148,7 +170,7 @@ namespace DesalEra.Unity
 
             for (int i = 0; i < inputs; i++)
             {
-                string state = wanted[i];
+                string state = AllStates[i];
                 var clip = Resources.Load<AnimationClip>("Survivor_" + state);
 
                 if (clip == null)

@@ -140,7 +140,7 @@ namespace DesalEra.Unity
         {
             // Prefer the Gerstner sea shader; fall back to a shiny lit plane if it failed
             // to import so the greybox never blacks out.
-            Shader sea = Shader.Find("DesalEra/SeaWater");
+            Shader sea = Shader.Find(RuntimeShaders.SeaWater);
             if (sea != null)
             {
                 var water = new Material(sea) { name = "Mat_Sea" };
@@ -212,38 +212,7 @@ namespace DesalEra.Unity
                 if (visual != null) _raftObjects.Add(visual);
             }
 
-            GameObject floor = BuildDeckFloor();
-            if (floor != null) _raftObjects.Add(floor);
-        }
-
-        private Mesh _floorMesh;
-
-        /// <summary>
-        /// Boards over the deck footprint. The survivor can stand anywhere inside the
-        /// footprint (see <see cref="RaftState.IsOverDeck"/>), so drawing exactly that
-        /// outline keeps what looks walkable and what is walkable the same; the opening
-        /// raft is otherwise a bare frame with the survivor standing on open water.
-        /// </summary>
-        private GameObject BuildDeckFloor()
-        {
-            if (_floorMesh != null) SafeDestroy(_floorMesh);
-            _floorMesh = null;
-
-            List<Vector2> outline = Raft.DeckFootprint();
-            if (outline.Count < 3) return null;
-
-            const float thickness = 0.06f;
-            // A centimetre under the beam tops, so the boards meet the frame without
-            // z-fighting along the strip where they overlap.
-            float top = PlayerController.DeckSurfaceLocalY - 0.01f;
-
-            _floorMesh = MeshFactory.Floor(outline.ToArray(), thickness, Materials.TilingMetresFor("deck"));
-            var go = new GameObject("deck_floor");
-            go.transform.SetParent(RaftRoot, worldPositionStays: false);
-            go.transform.localPosition = new Vector3(0f, top - thickness * 0.5f, 0f);
-            go.AddComponent<MeshFilter>().sharedMesh = _floorMesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = Materials.Get("deck");
-            return go;
+            // Floor planks are drawn per placement (socket F); no aggregated hull mesh.
         }
 
         /// <summary>The raft root members and piece visuals hang from, so they ride the swell.</summary>
@@ -251,22 +220,55 @@ namespace DesalEra.Unity
 
         /// <summary>Pieces drawn as a whole rather than member by member.</summary>
         public static bool HasPlacementVisual(string pieceName) =>
-            pieceName == "Roof" || pieceName == "Wall" || pieceName == "Stairs";
+            pieceName == "Roof" || pieceName == "Wall" || pieceName == "Stairs" || pieceName == "Deck";
 
         /// <summary>
-        /// Draws a roof slab, wall panel or flight of stairs at a placement. With a
-        /// material override it draws a build-preview ghost instead. Returns null for
-        /// pieces that are drawn as plain members.
+        /// Draws a roof slab, wall panel, floor plank or flight of stairs at a placement.
+        /// With a material override it draws a build-preview ghost instead. Returns null
+        /// for pieces that are drawn as plain members.
         /// </summary>
         public GameObject BuildPlacementVisual(BuildPiece piece, PlacementKey key, Material overrideMaterial)
         {
             switch (piece.Name)
             {
                 case "Roof": return BuildRoofSlab(key, overrideMaterial);
+                case "Deck": return BuildFloorPlank(key, overrideMaterial);
                 case "Wall": return BuildWallPanel(key, overrideMaterial);
                 case "Stairs": return BuildStairs(key, overrideMaterial);
                 default: return null;
             }
+        }
+
+        private GameObject BuildFloorPlank(PlacementKey floor, Material overrideMaterial)
+        {
+            float thickness = 0.06f;
+            float span = RaftState.CellSize;
+            Vector3 sw = RaftState.WorldOf(floor.Cell, floor.Level);
+            var go = new GameObject(overrideMaterial != null ? "preview_deck" : "deck_plank");
+            go.transform.SetParent(RaftRoot, worldPositionStays: false);
+            float top = floor.Level == 0
+                ? PlayerController.DeckSurfaceLocalY - 0.01f
+                : sw.y + RaftState.FloorTopAboveJointM;
+            go.transform.localPosition = new Vector3(
+                sw.x + span * 0.5f, top - thickness * 0.5f, sw.z + span * 0.5f);
+            go.transform.localRotation = Quaternion.identity;
+
+            var outline = new[]
+            {
+                new Vector2(-span * 0.5f, -span * 0.5f),
+                new Vector2(span * 0.5f, -span * 0.5f),
+                new Vector2(span * 0.5f, span * 0.5f),
+                new Vector2(-span * 0.5f, span * 0.5f),
+            };
+            Mesh mesh = MeshFactory.Floor(outline, thickness, Materials.TilingMetresFor("deck"));
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial =
+                overrideMaterial != null ? overrideMaterial : Materials.Get("deck");
+            if (overrideMaterial == null)
+            {
+                // Owned mesh; destroyed with the raft rebuild via SafeDestroy on filters.
+            }
+            return go;
         }
 
         private GameObject BuildRoofSlab(PlacementKey roof, Material overrideMaterial)
@@ -493,8 +495,8 @@ namespace DesalEra.Unity
         private static string MaterialKeyFor(Member member, string pieceName)
         {
             // Decks use floorboard grain; posts use timber end-grain friendly maps.
-            if (pieceName == "Deck") return member.Material == MaterialKind.Steel ? "rust"
-                : member.Material == MaterialKind.Concrete ? "concrete" : "deck";
+            if (pieceName == "Beam") return member.Material == MaterialKind.Wood ? "timber"
+                : member.Material == MaterialKind.Concrete ? "concrete" : "rust";
 
             switch (member.Material)
             {
@@ -716,7 +718,6 @@ namespace DesalEra.Unity
             }
             _slabMeshes.Clear();
 
-            if (_floorMesh != null) SafeDestroy(_floorMesh);
             if (_waterMaterial != null) SafeDestroy(_waterMaterial);
             if (_pickupMesh != null) SafeDestroy(_pickupMesh);
         }
